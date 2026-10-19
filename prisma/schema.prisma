@@ -1,0 +1,560 @@
+// NutriFlow - Schema Prisma (multi-tenant por workspace)
+// PostgreSQL
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum PerfilUsuario {
+  nutricionista
+  paciente
+  admin_clinica
+  admin_sistema
+
+  @@map("perfil_usuario")
+}
+
+enum OrigemDado {
+  busca_manual
+  scanner_codigo_barras
+  reconhecimento_ocr
+
+  @@map("origem_dado")
+}
+
+enum TipoPlano {
+  QUALITATIVO
+  POR_ALIMENTOS
+
+  @@map("tipo_plano")
+}
+
+enum TipoLancamentoFinanceiro {
+  receita
+  despesa
+}
+
+enum StatusLancamentoFinanceiro {
+  pendente
+  pago
+  atrasado
+}
+
+/// Conselho de registro do profissional (número no campo `crn` da tabela).
+enum TipoConselho {
+  crn
+  crm
+}
+
+// ---------------------------------------------------------------------------
+// Tenant (Workspace)
+// ---------------------------------------------------------------------------
+
+model Workspace {
+  id                 Int      @id @default(autoincrement())
+  nome               String
+  documento          String?
+  statusAssinatura   String?  @map("status_assinatura")
+  criadoEm           DateTime @default(now()) @map("criado_em")
+
+  usuarios           Usuario[]
+  pacientes          Paciente[]
+  modelosFormulario  ModeloFormulario[]
+  lancamentosFinanceiros LancamentoFinanceiro[]
+  cobrancasPacientes CobrancaPaciente[]
+
+  @@map("workspaces")
+}
+
+// ---------------------------------------------------------------------------
+// Usuários e perfis
+// ---------------------------------------------------------------------------
+
+model Usuario {
+  id           Int       @id @default(autoincrement())
+  workspaceId  Int?      @map("id_workspace")
+  email        String    @unique
+  senhaHash    String    @map("senha_hash")
+  perfil       PerfilUsuario
+  /// Conta apta a acessar a API (nutricionistas vindos do cadastro público iniciam false até o admin_sistema aprovar).
+  contaAtiva   Boolean   @default(true) @map("conta_ativa")
+  bloqueado    Boolean   @default(false)
+  criadoEm     DateTime  @default(now()) @map("criado_em")
+  atualizadoEm DateTime? @map("atualizado_em")
+
+  workspace    Workspace?    @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  nutricionista Nutricionista?
+  paciente      Paciente?
+  notasClinicasAutor NotaClinica[]
+  lancamentosFinanceiros LancamentoFinanceiro[]
+
+  @@index([workspaceId])
+  @@map("usuarios")
+}
+
+model Nutricionista {
+  id     Int     @id
+  nome   String?
+  /// Número do registro no conselho (CRN ou CRM, conforme `tipoConselho`).
+  crn    String?
+  tipoConselho TipoConselho @default(crn) @map("tipo_conselho")
+
+  /// Plano contratado no SaaS (`basico`, `profissional`, `clinica`). Escolhido no cadastro ou pelo super administrador.
+  planoSaas             String?   @map("plano_saas") @db.VarChar(32)
+  /// Dia do mês (1–28) em que vence a mensalidade.
+  diaVencimentoSaas     Int?      @map("dia_vencimento_saas")
+  /// Último dia (inclusive) do período pago; após esta data o acesso do nutricionista é bloqueado até novo pagamento registrado.
+  proximoVencimentoSaas DateTime? @db.Date @map("proximo_vencimento_saas")
+  ultimoPagamentoSaasEm DateTime? @map("ultimo_pagamento_saas_em")
+
+  /// Nome da clínica informado no cadastro público (opcional), para o super admin criar/vincular o workspace correto.
+  nomeClinicaCadastro String? @map("nome_clinica_cadastro") @db.VarChar(255)
+  /// CNPJ da clínica informado no cadastro público (opcional), apenas texto.
+  cnpjClinicaCadastro String? @map("cnpj_clinica_cadastro") @db.VarChar(32)
+
+  usuario              Usuario               @relation(fields: [id], references: [id], onDelete: Cascade)
+  pacientes            Paciente[]
+  planosAlimentares    PlanoAlimentar[]
+  consultasAgendadas   ConsultaAgendada[]
+
+  @@index([tipoConselho])
+  @@map("nutricionistas")
+}
+
+model Paciente {
+  id                Int       @id
+  workspaceId       Int       @map("id_workspace")
+  idNutricionista   Int       @map("id_nutricionista")
+  nome              String?
+  cpf               String?   @unique
+  celular           String?
+  dataNascimento    DateTime? @db.Date @map("data_nascimento")
+  genero            String?
+  objetivo          String?
+  notasClinicas     String?   @db.Text @map("notas_clinicas")
+  /// Caminho público servido em `/static/paciente-perfil/…` (ou URL absoluta).
+  urlFotoPerfil     String?   @map("url_foto_perfil")
+
+  usuario           Usuario            @relation(fields: [id], references: [id], onDelete: Cascade)
+  workspace         Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  nutricionista     Nutricionista      @relation(fields: [idNutricionista], references: [id], onDelete: Restrict)
+  avaliacoesFisicas AvaliacaoFisica[]
+  planosAlimentares PlanoAlimentar[]
+  registrosDiarios  RegistroDiario[]
+  enviosFormulario  EnvioFormulario[]
+  analisesIa        AnaliseIa[]
+  notasClinicasRegistro NotaClinica[]
+  consultasAgendadas    ConsultaAgendada[]
+  anamneses             Anamnese[]
+  cobrancaMensal        CobrancaPaciente?
+  lancamentosFinanceiros LancamentoFinanceiro[]
+
+  @@index([workspaceId])
+  @@index([idNutricionista])
+  @@map("pacientes")
+}
+
+model CobrancaPaciente {
+  id               Int      @id @default(autoincrement())
+  idPaciente       Int      @unique @map("id_paciente")
+  workspaceId      Int      @map("id_workspace")
+  ativa            Boolean  @default(true)
+  valorMensal      Float    @map("valor_mensal")
+  diaVencimento    Int      @map("dia_vencimento")
+  inicioCobranca   DateTime @db.Date @map("inicio_cobranca")
+  categoria        String?  @default("Mensalidade")
+  observacoes      String?  @db.Text
+  criadoEm         DateTime @default(now()) @map("criado_em")
+  atualizadoEm     DateTime @updatedAt @map("atualizado_em")
+
+  paciente         Paciente  @relation(fields: [idPaciente], references: [id], onDelete: Cascade)
+  workspace        Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+
+  @@index([workspaceId, ativa])
+  @@map("cobrancas_pacientes")
+}
+
+model ConsultaAgendada {
+  id                Int      @id @default(autoincrement())
+  idPaciente        Int      @map("id_paciente")
+  idNutricionista   Int      @map("id_nutricionista")
+  inicio            DateTime @db.Timestamptz(3) @map("inicio")
+  observacao        String?  @db.Text @map("observacao")
+  criadoEm          DateTime @default(now()) @map("criado_em")
+  atualizadoEm      DateTime @updatedAt @map("atualizado_em")
+
+  paciente       Paciente      @relation(fields: [idPaciente], references: [id], onDelete: Cascade)
+  nutricionista  Nutricionista @relation(fields: [idNutricionista], references: [id], onDelete: Restrict)
+
+  @@index([idNutricionista, inicio])
+  @@index([idPaciente])
+  @@map("consultas_agendadas")
+}
+
+model NotaClinica {
+  id         Int      @id @default(autoincrement())
+  idPaciente Int      @map("id_paciente")
+  conteudo   String   @db.Text
+  tipo       String   @default("consulta") @map("tipo")
+  criadoEm     DateTime @default(now()) @map("criado_em")
+  idAutor    Int      @map("id_autor")
+
+  paciente Paciente @relation(fields: [idPaciente], references: [id], onDelete: Cascade)
+  autor    Usuario  @relation(fields: [idAutor], references: [id], onDelete: Restrict)
+
+  @@index([idPaciente])
+  @@index([idAutor])
+  @@map("notas_clinicas")
+}
+
+// ---------------------------------------------------------------------------
+// Avaliações físicas
+// ---------------------------------------------------------------------------
+
+model AvaliacaoFisica {
+  id                    Int      @id @default(autoincrement())
+  idPaciente            Int      @map("id_paciente")
+  data                  DateTime @default(now()) @db.Date
+
+  // Medidas básicas
+  peso                  Float?
+  altura                Float?
+  alturaSentadoCm       Float?   @map("altura_sentado_cm")
+  alturaJoelhoCm        Float?   @map("altura_joelho_cm")
+  imc                   Float?
+  classificacaoImc      String?  @map("classificacao_imc")
+  rcq                   Float?
+  riscoMetabolicoRcq    String?  @map("risco_metabolico_rcq")
+
+  // Composição corporal
+  percentualGordura     Float?   @map("percentual_gordura")
+  classificacaoGordura  String?  @map("classificacao_gordura")
+  massaGorduraKg        Float?   @map("massa_gordura_kg")
+  massaLivreGorduraKg   Float?   @map("massa_livre_gordura_kg")
+  massaResidualKg       Float?   @map("massa_residual_kg")
+  massaMuscularKg       Float?   @map("massa_muscular_kg")
+
+  // Dobras cutâneas (10 dobras) + protocolo
+  protocoloGordura      String?  @map("protocolo_gordura")
+  somatorioDobrasMm     Float?   @map("somatorio_dobras_mm")
+  dobraTricipital       Float?   @map("dobra_tricipital")
+  dobraBicipital        Float?   @map("dobra_bicipital")
+  dobraSubescapular     Float?   @map("dobra_subescapular")
+  dobraAxilarMedia      Float?   @map("dobra_axilar_media")
+  dobraToracica         Float?   @map("dobra_toracica")
+  dobraAbdominal        Float?   @map("dobra_abdominal")
+  dobraSuprailiaca      Float?   @map("dobra_suprailiaca")
+  dobraSupraEspinhal    Float?   @map("dobra_supra_espinhal")
+  dobraCoxa             Float?   @map("dobra_coxa")
+  dobraPanturrilha      Float?   @map("dobra_panturrilha")
+
+  // Bioimpedância
+  biaPercentualGordura  Float?   @map("bia_percentual_gordura")
+  biaClassificacaoGordura String? @map("bia_classificacao_gordura")
+  biaPercentualMassaMuscular Float? @map("bia_percentual_massa_muscular")
+  biaMassaMuscularKg    Float?   @map("bia_massa_muscular_kg")
+  biaAguaCorporalTotalKg Float?  @map("bia_agua_corporal_total_kg")
+  biaMassaOsseaKg       Float?   @map("bia_massa_ossea_kg")
+  biaIndiceGorduraVisceral Float? @map("bia_indice_gordura_visceral")
+  biaIdadeMetabolica    Int?     @map("bia_idade_metabolica")
+
+  // Circunferências únicas (tronco)
+  circPescoco           Float?   @map("circ_pescoco")
+  circOmbro             Float?   @map("circ_ombro")
+  circTorax             Float?   @map("circ_torax")
+  circCintura           Float?   @map("circ_cintura")
+  circAbdomen           Float?   @map("circ_abdomen")
+  circQuadril           Float?   @map("circ_quadril")
+
+  // Circunferências bilaterais — Braço
+  circBracoDirRelaxado    Float?   @map("circ_braco_dir_relaxado")
+  circBracoEsqRelaxado    Float?   @map("circ_braco_esq_relaxado")
+  circBracoDirContraido   Float?   @map("circ_braco_dir_contraido")
+  circBracoEsqContraido   Float?   @map("circ_braco_esq_contraido")
+  circBracoDirCmb         Float?   @map("circ_braco_dir_cmb")
+  circBracoEsqCmb         Float?   @map("circ_braco_esq_cmb")
+
+  // Circunferências bilaterais — Antebraço
+  circAntebracoDirBraco   Float?   @map("circ_antebraco_dir")
+  circAntebracoEsq        Float?   @map("circ_antebraco_esq")
+
+  // Circunferências bilaterais — Coxa
+  circCoxaProximalDir     Float?   @map("circ_coxa_proximal_dir")
+  circCoxaProximalEsq     Float?   @map("circ_coxa_proximal_esq")
+  circCoxaMedialDir       Float?   @map("circ_coxa_medial_dir")
+  circCoxaMedialEsq       Float?   @map("circ_coxa_medial_esq")
+  circCoxaDistalDir       Float?   @map("circ_coxa_distal_dir")
+  circCoxaDistalEsq       Float?   @map("circ_coxa_distal_esq")
+
+  // Circunferências bilaterais — Panturrilha
+  circPanturrilhaDir      Float?   @map("circ_panturrilha_dir")
+  circPanturrilhaEsq      Float?   @map("circ_panturrilha_esq")
+
+  // Fotos
+  urlFotoFrente         String?  @map("url_foto_frente")
+  urlFotoCostas         String?  @map("url_foto_costas")
+  urlFotoLado           String?  @map("url_foto_lado")
+
+  paciente Paciente @relation(fields: [idPaciente], references: [id], onDelete: Cascade)
+
+  @@map("avaliacoes_fisicas")
+}
+
+// ---------------------------------------------------------------------------
+// Base de alimentos (global — sem tenant)
+// ---------------------------------------------------------------------------
+
+model BaseAlimento {
+  id                Int     @id @default(autoincrement())
+  nome              String
+  /// Marca comercial quando disponível (ex.: Open Food Facts).
+  marca             String? @map("marca")
+  codigoBarras      String? @unique @map("codigo_barras")
+  fdcId             Int?    @unique @map("fdc_id")
+  /// Código alfanumérico da TBCA (ex.: C0113T), quando a linha veio dessa base
+  codigoTbca        String? @unique @map("codigo_tbca")
+  classeTbca        String? @map("classe_tbca")
+  fonte             String?
+  calorias          Float?
+  proteinas         Float?
+  carboidratos      Float?
+  gorduras          Float?
+  fibras            Float?
+  sodio             Float?
+  ehUltraprocessado Boolean @default(false) @map("eh_ultraprocessado")
+  scoreNova         Int?    @map("score_nova")
+
+  itensDieta       ItemDieta[]
+  itensConsumidos  ItemConsumido[]
+
+  @@map("base_alimentos")
+}
+
+// ---------------------------------------------------------------------------
+// Planos alimentares e refeições
+// ---------------------------------------------------------------------------
+
+model PlanoAlimentar {
+  id                    Int        @id @default(autoincrement())
+  idPaciente            Int        @map("id_paciente")
+  idNutricionista       Int        @map("id_nutricionista")
+  nome                  String?
+  tipoPlano             TipoPlano  @default(POR_ALIMENTOS) @map("tipo_plano")
+  descricaoQualitativa  String?    @db.Text @map("descricao_qualitativa")
+  dataInicio            DateTime?  @db.Date @map("data_inicio")
+  dataFim               DateTime?  @db.Date @map("data_fim")
+  ativo                 Boolean?
+  metaAguaLitros        Float?     @map("meta_agua_litros")
+
+  paciente           Paciente            @relation(fields: [idPaciente], references: [id], onDelete: Cascade)
+  nutricionista      Nutricionista       @relation(fields: [idNutricionista], references: [id], onDelete: Restrict)
+  refeicoesPlanejadas RefeicaoPlanejada[]
+
+  @@map("planos_alimentares")
+}
+
+model RefeicaoPlanejada {
+  id               Int      @id @default(autoincrement())
+  idPlanoAlimentar  Int      @map("id_plano_alimentar")
+  nome             String?
+  horarioSugerido   DateTime? @db.Time @map("horario_sugerido")
+
+  planoAlimentar PlanoAlimentar @relation(fields: [idPlanoAlimentar], references: [id], onDelete: Cascade)
+  itensDieta     ItemDieta[]
+
+  @@map("refeicoes_planejadas")
+}
+
+model ItemDieta {
+  id                   Int      @id @default(autoincrement())
+  idRefeicaoPlanejada  Int      @map("id_refeicao_planejada")
+  idAlimento           Int      @map("id_alimento")
+  quantidadeGramas     Float?   @map("quantidade_gramas")
+  medidaCaseira        String?  @map("medida_caseira")
+  aVontade             Boolean  @default(false) @map("a_vontade")
+  idGrupoSubstituicao  Int?     @map("id_grupo_substituicao")
+
+  refeicaoPlanejada RefeicaoPlanejada @relation(fields: [idRefeicaoPlanejada], references: [id], onDelete: Cascade)
+  alimento          BaseAlimento      @relation(fields: [idAlimento], references: [id], onDelete: Restrict)
+
+  @@map("itens_dieta")
+}
+
+// ---------------------------------------------------------------------------
+// Registros diários e itens consumidos
+// ---------------------------------------------------------------------------
+
+model RegistroDiario {
+  id             Int      @id @default(autoincrement())
+  idPaciente     Int      @map("id_paciente")
+  registradoEm   DateTime? @map("registrado_em")
+  tipoRefeicao   String?  @map("tipo_refeicao")
+  urlFotoPrato   String?  @map("url_foto_prato")
+  ingestaoAguaMl Int?     @map("ingestao_agua_ml")
+
+  paciente       Paciente        @relation(fields: [idPaciente], references: [id], onDelete: Cascade)
+  itensConsumidos ItemConsumido[]
+
+  @@map("registros_diarios")
+}
+
+model ItemConsumido {
+  id                 Int        @id @default(autoincrement())
+  idRegistro         Int        @map("id_registro")
+  idAlimento         Int        @map("id_alimento")
+  quantidadeConsumida Float?    @map("quantidade_consumida")
+  origem             OrigemDado?
+
+  registro RegistroDiario @relation(fields: [idRegistro], references: [id], onDelete: Cascade)
+  alimento BaseAlimento   @relation(fields: [idAlimento], references: [id], onDelete: Restrict)
+
+  @@map("itens_consumidos")
+}
+
+// ---------------------------------------------------------------------------
+// Formulários (modelos por workspace)
+// ---------------------------------------------------------------------------
+
+model ModeloFormulario {
+  id               Int    @id @default(autoincrement())
+  workspaceId      Int    @map("id_workspace")
+  titulo           String?
+  frequenciaDias   Int?   @map("frequencia_dias")
+
+  workspace        Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  perguntas        Pergunta[]
+  enviosFormulario EnvioFormulario[]
+
+  @@index([workspaceId])
+  @@map("modelos_formulario")
+}
+
+model Pergunta {
+  id            Int     @id @default(autoincrement())
+  idModelo      Int     @map("id_modelo")
+  textoPergunta String? @map("texto_pergunta")
+  tipoResposta  String? @map("tipo_resposta")
+  tagAnalise    String? @map("tag_analise")
+  /// Opções para múltipla escolha (JSON array de strings), ex.: ["Sim","Não","Talvez"]
+  opcoesJson    Json?   @map("opcoes_json")
+  obrigatoria   Boolean @default(false) @map("obrigatoria")
+
+  modelo   ModeloFormulario  @relation(fields: [idModelo], references: [id], onDelete: Cascade)
+  respostas Resposta[]
+
+  @@map("perguntas")
+}
+
+model EnvioFormulario {
+  id           Int       @id @default(autoincrement())
+  idPaciente   Int       @map("id_paciente")
+  idModelo     Int       @map("id_modelo")
+  enviadoEm    DateTime? @map("enviado_em")
+  respondidoEm DateTime? @map("respondido_em")
+  status       String?
+
+  paciente  Paciente  @relation(fields: [idPaciente], references: [id], onDelete: Cascade)
+  modelo    ModeloFormulario @relation(fields: [idModelo], references: [id], onDelete: Restrict)
+  respostas Resposta[]
+
+  @@map("envios_formulario")
+}
+
+model Resposta {
+  id           Int    @id @default(autoincrement())
+  idEnvio      Int    @map("id_envio")
+  idPergunta   Int    @map("id_pergunta")
+  valorResposta String? @db.Text @map("valor_resposta")
+
+  envio    EnvioFormulario @relation(fields: [idEnvio], references: [id], onDelete: Cascade)
+  pergunta Pergunta        @relation(fields: [idPergunta], references: [id], onDelete: Restrict)
+
+  @@map("respostas")
+}
+
+// ---------------------------------------------------------------------------
+// Análises IA
+// ---------------------------------------------------------------------------
+
+model AnaliseIa {
+  id               Int      @id @default(autoincrement())
+  idPaciente       Int      @map("id_paciente")
+  criadoEm         DateTime? @map("criado_em")
+  tipoAnalise      String?  @map("tipo_analise")
+  snapshotPrompt   String?  @db.Text @map("snapshot_prompt")
+  respostaBruta    String?  @db.Text @map("resposta_bruta")
+  dadosEstruturados Json?   @map("dados_estruturados")
+
+  paciente Paciente @relation(fields: [idPaciente], references: [id], onDelete: Cascade)
+
+  @@map("analises_ia")
+}
+
+model Anamnese {
+  id                       Int       @id @default(autoincrement())
+  idPaciente               Int       @map("id_paciente")
+  data                     DateTime  @default(now()) @map("data")
+  queixaPrincipal          String?   @db.Text @map("queixa_principal")
+  historiaDoencaAtual      String?   @db.Text @map("historia_doenca_atual")
+  patologias               String?   @db.Text @map("patologias")
+  medicamentos             String?   @db.Text @map("medicamentos")
+  suplementos              String?   @db.Text @map("suplementos")
+  alergias                 String?   @db.Text @map("alergias")
+  intolerancias            String?   @db.Text @map("intolerancias")
+  historicoFamiliar        String?   @db.Text @map("historico_familiar")
+  habitosAlimentares       String?   @db.Text @map("habitos_alimentares")
+  restricoesAlimentares    String?   @db.Text @map("restricoes_alimentares")
+  frequenciaAlimentar      String?   @db.Text @map("frequencia_alimentar")
+  ingestaoHidrica          String?   @map("ingestao_hidrica")
+  funcionamentoIntestinal  String?   @map("funcionamento_intestinal")
+  qualidadeSono            String?   @map("qualidade_sono")
+  atividadeFisica          String?   @db.Text @map("atividade_fisica")
+  nivelEstresse            String?   @map("nivel_estresse")
+  tabagismo                String?   @map("tabagismo")
+  etilismo                 String?   @map("etilismo")
+  observacoes              String?   @db.Text @map("observacoes")
+  criadoEm                 DateTime  @default(now()) @map("criado_em")
+  atualizadoEm             DateTime  @updatedAt @map("atualizado_em")
+
+  paciente Paciente @relation(fields: [idPaciente], references: [id], onDelete: Cascade)
+
+  @@map("anamneses")
+}
+
+model LancamentoFinanceiro {
+  id             Int                        @id @default(autoincrement())
+  workspaceId    Int                        @map("id_workspace")
+  idResponsavel  Int                        @map("id_responsavel")
+  idPaciente     Int?                       @map("id_paciente")
+  descricao      String
+  pacienteNome   String?                    @map("paciente_nome")
+  categoria      String?
+  competencia    String?                    @db.VarChar(7)
+  origem         String?
+  tipo           TipoLancamentoFinanceiro
+  status         StatusLancamentoFinanceiro @default(pendente)
+  valor          Float
+  vencimento     DateTime                   @db.Date
+  pagoEm         DateTime?                  @db.Date @map("pago_em")
+  observacoes    String?                    @db.Text
+  criadoEm       DateTime                   @default(now()) @map("criado_em")
+  atualizadoEm   DateTime                   @updatedAt @map("atualizado_em")
+
+  workspace      Workspace                  @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  responsavel    Usuario                    @relation(fields: [idResponsavel], references: [id], onDelete: Restrict)
+  paciente       Paciente?                  @relation(fields: [idPaciente], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, vencimento])
+  @@index([workspaceId, status])
+  @@index([workspaceId, competencia])
+  @@index([idResponsavel])
+  @@map("lancamentos_financeiros")
+}
