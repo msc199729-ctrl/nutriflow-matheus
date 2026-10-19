@@ -1,6 +1,6 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsArray, IsInt, IsOptional, IsString, Min, ValidateNested } from 'class-validator';
+import { IsArray, IsInt, IsNumber, IsOptional, IsString, Min, ValidateNested } from 'class-validator';
 import { CreateItemConsumidoDto } from './create-item-consumido.dto';
 
 export class CreateRegistroDiarioDto {
@@ -20,6 +20,17 @@ export class CreateRegistroDiarioDto {
   @IsInt()
   @Min(0)
   ingestaoAguaMl?: number;
+    @ApiPropertyOptional({ description: 'Horas de sono do dia' })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  horasSono?: number;
+
+  @ApiPropertyOptional({ description: 'Peso do dia em kg' })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  pesoKg?: number;
 
   @ApiPropertyOptional({ description: 'Itens consumidos (alimentos)' })
   @IsOptional()

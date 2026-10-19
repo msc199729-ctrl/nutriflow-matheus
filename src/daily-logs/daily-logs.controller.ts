@@ -63,7 +63,8 @@ export class DailyLogsController {
         idPaciente: { type: 'number' },
         tipoRefeicao: { type: 'string' },
         ingestaoAguaMl: { type: 'number' },
-      },
+        horasSono: { type: 'number' },
+        pesoKg: { type: 'number' },      },
     },
   })
   @ApiResponse({ status: 201, description: 'Registro criado' })

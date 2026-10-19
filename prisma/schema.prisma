@@ -41,6 +41,40 @@ enum TipoLancamentoFinanceiro {
   receita
   despesa
 }
+// ---------------------------------------------------------------------------
+// Treinos
+// ---------------------------------------------------------------------------
+model Treino {
+  id          Int      @id @default(autoincrement())
+  idPaciente  Int      @map("id_paciente")
+  data        DateTime @db.Date
+  tipo        String?
+  duracaoMin  Int?     @map("duracao_min")
+  intensidade String?
+  observacoes String?  @db.Text
+  criadoEm    DateTime @default(now()) @map("criado_em")
+  paciente    Paciente @relation(fields: [idPaciente], references: [id], onDelete: Cascade)
+  @@index([idPaciente, data])
+  @@map("treinos")
+}
+
+// ---------------------------------------------------------------------------
+// Metas
+// ---------------------------------------------------------------------------
+model Meta {
+  id         Int       @id @default(autoincrement())
+  idPaciente Int       @map("id_paciente")
+  titulo     String
+  tipo       String?
+  valorAlvo  Float?    @map("valor_alvo")
+  unidade    String?
+  prazo      DateTime? @db.Date
+  concluida  Boolean   @default(false)
+  criadoEm   DateTime  @default(now()) @map("criado_em")
+  paciente   Paciente  @relation(fields: [idPaciente], references: [id], onDelete: Cascade)
+  @@index([idPaciente])
+  @@map("metas")
+}
 
 enum StatusLancamentoFinanceiro {
   pendente
@@ -155,6 +189,8 @@ model Paciente {
   consultasAgendadas    ConsultaAgendada[]
   anamneses             Anamnese[]
   cobrancaMensal        CobrancaPaciente?
+  treinos               Treino[]
+  metas                 Meta[]
   lancamentosFinanceiros LancamentoFinanceiro[]
 
   @@index([workspaceId])
@@ -399,6 +435,8 @@ model RegistroDiario {
   tipoRefeicao   String?  @map("tipo_refeicao")
   urlFotoPrato   String?  @map("url_foto_prato")
   ingestaoAguaMl Int?     @map("ingestao_agua_ml")
+  horasSono      Float?   @map("horas_sono")
+  pesoKg         Float?   @map("peso_kg")
 
   paciente       Paciente        @relation(fields: [idPaciente], references: [id], onDelete: Cascade)
   itensConsumidos ItemConsumido[]

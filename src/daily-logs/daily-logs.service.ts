@@ -82,7 +82,8 @@ export class DailyLogsService {
         tipoRefeicao: dto.tipoRefeicao ?? null,
         urlFotoPrato: urlFotoPrato ?? null,
         ingestaoAguaMl: dto.ingestaoAguaMl ?? null,
-      },
+        horasSono: dto.horasSono ?? null,
+        pesoKg: dto.pesoKg ?? null,      },
     });
     if (itens.length > 0) {
       await this.prisma.itemConsumido.createMany({

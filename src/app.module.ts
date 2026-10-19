@@ -21,6 +21,9 @@ import { AgendamentosModule } from './agendamentos/agendamentos.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { AnamneseModule } from './anamnese/anamnese.module';
 import { FinanceiroModule } from './financeiro/financeiro.module';
+import { TreinosModule } from './treinos/treinos.module';
+import { MetasModule } from './metas/metas.module';
+import { AnaliseModule } from './analise/analise.module';
 
 @Module({
   imports: [
@@ -45,6 +48,9 @@ import { FinanceiroModule } from './financeiro/financeiro.module';
     DailyLogsModule,
     AnamneseModule,
     FinanceiroModule,
+    TreinosModule,
+    MetasModule,
+    AnaliseModule,
   ],
   controllers: [AppController],
   providers: [
