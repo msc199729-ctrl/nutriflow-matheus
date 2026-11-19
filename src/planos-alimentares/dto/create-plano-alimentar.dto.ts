@@ -1,10 +1,8 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
+﻿import { Type } from 'class-transformer';
 import {
-  ArrayMinSize,
   IsArray,
   IsBoolean,
-  IsEnum,
+  IsIn,
   IsInt,
   IsNumber,
   IsOptional,
@@ -12,92 +10,78 @@ import {
   Matches,
   MaxLength,
   Min,
-  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 
-export enum TipoPlanoDto {
-  QUALITATIVO = 'QUALITATIVO',
-  POR_ALIMENTOS = 'POR_ALIMENTOS',
-}
-
-export class CreateItemPlanoDto {
-  @ApiProperty()
+export class CreateItemDietaDto {
   @IsInt()
   idAlimento: number;
 
-  @ApiPropertyOptional({ description: 'Quantidade em gramas' })
   @IsOptional()
   @IsNumber()
-  @Min(0.1)
-  quantidadeGramas?: number;
+  quantidadeGramas?: number | null;
 
-  @ApiPropertyOptional({ description: 'Medida caseira (ex: 1 colher de sopa)' })
   @IsOptional()
   @IsString()
-  @MaxLength(120)
-  medidaCaseira?: string;
+  medidaCaseira?: string | null;
 
-  @ApiPropertyOptional({ description: 'Alimento consumido à vontade', default: false })
+  @IsOptional()
+  @IsString()
+  idMedidaCaseira?: string | null;
+
+  @IsOptional()
+  @IsNumber()
+  quantidadeMedida?: number | null;
+
   @IsOptional()
   @IsBoolean()
   aVontade?: boolean;
 
-  @ApiPropertyOptional({ description: 'Grupo de substituição (alimentos com mesmo grupo são intercambiáveis)' })
   @IsOptional()
   @IsInt()
-  @Min(1)
-  idGrupoSubstituicao?: number;
+  idGrupoSubstituicao?: number | null;
 }
 
-export class CreateRefeicaoPlanoDto {
-  @ApiProperty({ example: 'Café da manhã' })
+export class CreateRefeicaoPlanejadaDto {
   @IsString()
-  @MaxLength(120)
   nome: string;
 
-  @ApiProperty({ example: '07:30', description: 'Horário HH:mm' })
-  @Matches(/^([01]\d|2[0-3]):[0-5]\d$/, { message: 'Use o formato HH:mm' })
-  horario: string;
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d{2}:\d{2}$/)
+  horarioSugerido?: string;
 
-  @ApiProperty({ type: [CreateItemPlanoDto] })
   @IsArray()
   @ValidateNested({ each: true })
-  @Type(() => CreateItemPlanoDto)
-  itens: CreateItemPlanoDto[];
+  @Type(() => CreateItemDietaDto)
+  itensDieta: CreateItemDietaDto[];
 }
 
 export class CreatePlanoAlimentarDto {
-  @ApiProperty()
   @IsInt()
   idPaciente: number;
 
-  @ApiPropertyOptional({ example: 'Plano hipocalórico' })
   @IsOptional()
   @IsString()
-  @MaxLength(200)
+  @MaxLength(80)
   nome?: string;
 
-  @ApiProperty({ enum: TipoPlanoDto, description: 'Tipo do plano alimentar' })
-  @IsEnum(TipoPlanoDto)
-  tipoPlano: TipoPlanoDto;
+  @IsOptional()
+  @IsIn(['QUALITATIVO', 'POR_ALIMENTOS'])
+  tipoPlano?: 'QUALITATIVO' | 'POR_ALIMENTOS';
 
-  @ApiPropertyOptional({ description: 'Descrição qualitativa (texto rico) — obrigatório quando tipoPlano = QUALITATIVO' })
-  @ValidateIf((o) => o.tipoPlano === TipoPlanoDto.QUALITATIVO)
+  @IsOptional()
   @IsString()
-  descricaoQualitativa?: string;
+  descricaoQualitativa?: string | null;
 
-  @ApiPropertyOptional({ description: 'Meta de água em litros/dia' })
   @IsOptional()
   @IsNumber()
   @Min(0)
-  metaAguaLitros?: number;
+  metaAguaLitros?: number | null;
 
-  @ApiPropertyOptional({ type: [CreateRefeicaoPlanoDto] })
-  @ValidateIf((o) => o.tipoPlano === TipoPlanoDto.POR_ALIMENTOS)
+  @IsOptional()
   @IsArray()
-  @ArrayMinSize(1)
   @ValidateNested({ each: true })
-  @Type(() => CreateRefeicaoPlanoDto)
-  refeicoes?: CreateRefeicaoPlanoDto[];
+  @Type(() => CreateRefeicaoPlanejadaDto)
+  refeicoesPlanejadas?: CreateRefeicaoPlanejadaDto[];
 }

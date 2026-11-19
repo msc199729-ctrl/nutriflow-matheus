@@ -1,9 +1,15 @@
 import { Module } from "@nestjs/common";
-import { AnaliseController } from "./analise.controller";
-import { AnaliseService } from "./analise.service";
+import { PrismaModule } from "../prisma/prisma.module";
+import { AnaliseComparativoService } from "./analise-comparativo.service";
+import { AnaliseComparativoController } from "./analise-comparativo.controller";
 
 @Module({
-  controllers: [AnaliseController],
-  providers: [AnaliseService],
+  imports: [PrismaModule],
+  controllers: [
+    AnaliseComparativoController,
+  ],
+  providers: [
+    AnaliseComparativoService,
+  ],
 })
 export class AnaliseModule {}

@@ -1,10 +1,9 @@
-import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 
 function getDatasourceUrl(): string {
-  const url = process.env.DATABASE_URL;
-  if (url) return url;
+  if (process.env.DATABASE_URL) return process.env.DATABASE_URL;
   const host = process.env.DB_HOST ?? 'localhost';
   const port = process.env.DB_PORT ?? '5432';
   const user = process.env.DB_USER ?? 'postgres';
@@ -19,16 +18,14 @@ export class PrismaService
   implements OnModuleInit, OnModuleDestroy
 {
   constructor() {
-    const connectionString = getDatasourceUrl();
-    const adapter = new PrismaPg({ connectionString });
-    super({ adapter });
+    super({ adapter: new PrismaPg({ connectionString: getDatasourceUrl() }) });
   }
 
-  async onModuleInit(): Promise<void> {
+  async onModuleInit() {
     await this.$connect();
   }
 
-  async onModuleDestroy(): Promise<void> {
+  async onModuleDestroy() {
     await this.$disconnect();
   }
 }

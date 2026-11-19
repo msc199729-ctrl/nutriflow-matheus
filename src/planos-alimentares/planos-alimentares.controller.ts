@@ -1,65 +1,93 @@
-import {
-  Body,
-  Controller,
-  Get,
-  Param,
-  ParseIntPipe,
-  Post,
-  Query,
-} from '@nestjs/common';
-import { ApiBearerAuth, ApiResponse, ApiTags } from '@nestjs/swagger';
-import { PlanosAlimentaresService } from './planos-alimentares.service';
+import {Body,Controller,Delete,Get,Param,ParseIntPipe,Patch,Post,Query,UseGuards,} from '@nestjs/common';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { JwtPayloadUser } from '../common/decorators/current-user.decorator';
+import { PlanosAlimentaresService } from './planos-alimentares.service';
 import { CreatePlanoAlimentarDto } from './dto/create-plano-alimentar.dto';
+import { UpdateNomePlanoDto } from './dto/update-nome-plano.dto';
+import { UpdatePlanoAlimentarDto } from './dto/update-plano-alimentar.dto';
 
-@ApiTags('Planos Alimentares')
-@ApiBearerAuth('access-token')
 @Controller('planos-alimentares')
+@UseGuards(JwtAuthGuard)
 export class PlanosAlimentaresController {
-  constructor(private readonly planosAlimentaresService: PlanosAlimentaresService) {}
-
-  @Post()
-  @ApiResponse({ status: 201, description: 'Plano criado (demais planos ativos do paciente desativados)' })
-  @ApiResponse({ status: 403, description: 'Sem permissão' })
-  createPlano(
-    @Body() dto: CreatePlanoAlimentarDto,
-    @CurrentUser() user: JwtPayloadUser,
-  ) {
-    return this.planosAlimentaresService.createPlanoNutricionista(dto, user);
-  }
+  constructor(
+    private readonly planosAlimentaresService: PlanosAlimentaresService,
+  ) {}
 
   @Get('me')
-  @ApiResponse({ status: 200, description: 'Plano ativo do paciente' })
-  @ApiResponse({ status: 403, description: 'Apenas paciente' })
-  findPlanoAtivo(@CurrentUser() user: JwtPayloadUser) {
+  meuPlano(@CurrentUser() user: JwtPayloadUser) {
     return this.planosAlimentaresService.findPlanoAtivoByPaciente(user);
   }
 
+  @Get('me/todos')
+  meusPlanos(@CurrentUser() user: JwtPayloadUser) {
+    return this.planosAlimentaresService.findPlanosDisponiveisByPaciente(user);
+  }
+
   @Get()
-  @ApiResponse({ status: 200, description: 'Lista de planos do paciente (profissional ou o próprio paciente)' })
-  @ApiResponse({ status: 403, description: 'Sem permissão' })
-  listByPaciente(
+  listar(
     @Query('idPaciente', ParseIntPipe) idPaciente: number,
     @CurrentUser() user: JwtPayloadUser,
   ) {
     return this.planosAlimentaresService.listByPaciente(idPaciente, user);
   }
 
-  @Get(':id')
-  @ApiResponse({ status: 200, description: 'Detalhe do plano (refeições e itens)' })
-  @ApiResponse({ status: 404, description: 'Não encontrado' })
-  findOne(
+  @Post()
+  criar(
+    @Body() dto: CreatePlanoAlimentarDto,
+    @CurrentUser() user: JwtPayloadUser,
+  ) {
+    return this.planosAlimentaresService.createPlanoNutricionista(dto, user);
+  }
+
+  @Post(':id/duplicar')
+  duplicar(
     @Param('id', ParseIntPipe) id: number,
     @CurrentUser() user: JwtPayloadUser,
   ) {
-    return this.planosAlimentaresService.findOnePlano(id, user);
+    return this.planosAlimentaresService.duplicarPlano(id, user);
+  }
+
+  @Patch(':id/disponibilidade')
+  disponibilidade(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { ativo: boolean },
+    @CurrentUser() user: JwtPayloadUser,
+  ) {
+    return this.planosAlimentaresService.definirDisponibilidade(
+      id,
+      body.ativo === true,
+      user,
+    );
+  }
+  @Patch(':id')
+  atualizar(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdatePlanoAlimentarDto,
+    @CurrentUser() user: JwtPayloadUser,
+  ) {
+    return this.planosAlimentaresService.atualizarPlano(id, dto, user);
+  }
+  
+  @Patch(':id/nome')
+  renomear(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateNomePlanoDto,
+    @CurrentUser() user: JwtPayloadUser,
+  ) {
+    return this.planosAlimentaresService.renomearPlano(id, dto.nome, user);
+  }
+
+  @Delete(':id')
+  remover(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: JwtPayloadUser,
+  ) {
+    return this.planosAlimentaresService.removePlano(id, user);
   }
 
   @Get(':id/shopping-list')
-  @ApiResponse({ status: 200, description: 'Lista de compras consolidada do plano' })
-  @ApiResponse({ status: 404, description: 'Plano não encontrado' })
-  getShoppingList(
+  listaCompras(
     @Param('id', ParseIntPipe) id: number,
     @CurrentUser() user: JwtPayloadUser,
   ) {
@@ -67,12 +95,18 @@ export class PlanosAlimentaresController {
   }
 
   @Get(':id/resumo')
-  @ApiResponse({ status: 200, description: 'Resumo comparativo: Prescrito vs Necessidade Alvo' })
-  @ApiResponse({ status: 404, description: 'Plano não encontrado' })
-  getResumoComparativo(
+  resumo(
     @Param('id', ParseIntPipe) id: number,
     @CurrentUser() user: JwtPayloadUser,
   ) {
     return this.planosAlimentaresService.getResumoComparativo(id, user);
+  }
+
+  @Get(':id')
+  detalhe(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: JwtPayloadUser,
+  ) {
+    return this.planosAlimentaresService.findOnePlano(id, user);
   }
 }

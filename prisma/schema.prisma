@@ -370,8 +370,10 @@ model BaseAlimento {
 
   itensDieta       ItemDieta[]
   itensConsumidos  ItemConsumido[]
-
+  nomeExibicao  String? @map("nome_exibicao")
+  nomeBusca     String? @map("nome_busca")
   @@map("base_alimentos")
+  medidasCaseiras  MedidaCaseira[]
 }
 
 // ---------------------------------------------------------------------------
@@ -415,15 +417,17 @@ model ItemDieta {
   idAlimento           Int      @map("id_alimento")
   quantidadeGramas     Float?   @map("quantidade_gramas")
   medidaCaseira        String?  @map("medida_caseira")
+  idMedidaCaseira      String?  @map("id_medida_caseira")
+  quantidadeMedida     Float?   @map("quantidade_medida")
   aVontade             Boolean  @default(false) @map("a_vontade")
   idGrupoSubstituicao  Int?     @map("id_grupo_substituicao")
 
   refeicaoPlanejada RefeicaoPlanejada @relation(fields: [idRefeicaoPlanejada], references: [id], onDelete: Cascade)
   alimento          BaseAlimento      @relation(fields: [idAlimento], references: [id], onDelete: Restrict)
+  medidaRef         MedidaCaseira?    @relation(fields: [idMedidaCaseira], references: [id], onDelete: SetNull)
 
   @@map("itens_dieta")
 }
-
 // ---------------------------------------------------------------------------
 // Registros diários e itens consumidos
 // ---------------------------------------------------------------------------
@@ -448,6 +452,7 @@ model ItemConsumido {
   id                 Int        @id @default(autoincrement())
   idRegistro         Int        @map("id_registro")
   idAlimento         Int        @map("id_alimento")
+  /// SEMPRE em gramas. Conversão de medida caseira → gramas acontece no frontend.
   quantidadeConsumida Float?    @map("quantidade_consumida")
   origem             OrigemDado?
 
@@ -595,4 +600,25 @@ model LancamentoFinanceiro {
   @@index([workspaceId, competencia])
   @@index([idResponsavel])
   @@map("lancamentos_financeiros")
+}
+model MedidaCaseira {
+  id            String        @id @default(cuid())
+  alimentoId    Int
+  alimento      BaseAlimento  @relation(fields: [alimentoId], references: [id], onDelete: Cascade)
+
+  /// Nome exibido no dropdown: "Colher(es) de sopa cheia", "Unidade", "Filé médio"
+  nome          String
+  /// Gramas correspondentes a 1 unidade desta medida
+  gramas        Decimal       @db.Decimal(8, 2)
+  /// Ordem de exibição no dropdown (menor = primeiro)
+  ordem         Int           @default(0)
+  /// true = medida padrão pré-selecionada ao escolher o alimento
+  padrao        Boolean       @default(false)
+
+  createdAt     DateTime      @default(now())
+  itensDieta    ItemDieta[]
+
+  @@unique([alimentoId, nome])
+  @@index([alimentoId])
+  @@map("MedidaCaseira")
 }
