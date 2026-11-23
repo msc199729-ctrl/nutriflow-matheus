@@ -10,8 +10,20 @@ import type { JwtPayloadUser } from '../common/decorators/current-user.decorator
 import { PacientesService } from '../pacientes/pacientes.service';
 import { CreatePlanoAlimentarDto } from './dto/create-plano-alimentar.dto';
 import { UpdatePlanoAlimentarDto } from './dto/update-plano-alimentar.dto';
-import {calcularTmbMifflinStJeor,idadeEmAnos,} from '../physical-evaluations/physical-evaluations-calc.service';
+import {
+  calcularTmbMifflinStJeor,
+  idadeEmAnos,
+} from '../physical-evaluations/physical-evaluations-calc.service';
 import { limparNomeAlimento } from '../foods/foods.service';
+
+/** Include padrão de itens — sempre com alimento e substitutos. */
+const ITENS_INCLUDE = {
+  alimento: true,
+  substitutos: {
+    include: { alimento: true },
+    orderBy: { ordem: 'asc' as const },
+  },
+};
 
 /** Remove acentos para o regex funcionar com "Café" e "Cafe". */
 function semAcento(texto: string | null | undefined): string {
@@ -51,6 +63,29 @@ function formatHorarioDoBanco(d: Date | null): string {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }
 
+export interface LinhaSubstituto {
+  idAlimento: number;
+  nome: string;
+  nomeExibicao: string;
+  totalGramas: number;
+  aVontade: boolean;
+}
+
+export interface ItemListaCompras {
+  idAlimento: number;
+  nome: string;
+  nomeExibicao: string;
+  totalGramas: number;
+  aVontade: boolean;
+  substitutos: LinhaSubstituto[];
+}
+
+export interface ListaComprasResult {
+  idPlano: number;
+  nomePlano: string | null;
+  itens: ItemListaCompras[];
+}
+
 @Injectable()
 export class PlanosAlimentaresService {
   constructor(
@@ -78,7 +113,7 @@ export class PlanosAlimentaresService {
       include: {
         refeicoesPlanejadas: {
           orderBy: { horarioSugerido: 'asc' },
-          include: { itensDieta: { include: { alimento: true } } },
+          include: { itensDieta: { include: ITENS_INCLUDE } },
         },
       },
     });
@@ -103,9 +138,7 @@ export class PlanosAlimentaresService {
       include: {
         refeicoesPlanejadas: {
           orderBy: { horarioSugerido: 'asc' },
-          include: {
-            itensDieta: { include: { alimento: true } },
-          },
+          include: { itensDieta: { include: ITENS_INCLUDE } },
         },
       },
     });
@@ -146,13 +179,35 @@ export class PlanosAlimentaresService {
         refeicoesPlanejadas: {
           orderBy: { horarioSugerido: 'asc' },
           include: {
-            itensDieta: { include: { alimento: true } },
+            itensDieta: {
+              include: {
+                substitutos: {
+                  include: { alimento: true },
+                  orderBy: { ordem: 'asc' },
+                },
+                alimento: {
+                  include: {
+                    medidasCaseiras: {
+                      orderBy: [{ padrao: 'desc' }, { ordem: 'asc' }],
+                      select: {
+                        id: true,
+                        nome: true,
+                        gramas: true,
+                        padrao: true,
+                        ordem: true,
+                      },
+                    },
+                  },
+                },
+              },
+            },
           },
         },
       },
     });
     if (!plano) throw new NotFoundException('Plano não encontrado');
     await this.pacientesService.findOne(plano.idPaciente, user);
+
     return {
       id: plano.id,
       idPaciente: plano.idPaciente,
@@ -174,7 +229,42 @@ export class PlanosAlimentaresService {
           idMedidaCaseira: it.idMedidaCaseira ?? null,
           quantidadeMedida: it.quantidadeMedida ?? null,
           aVontade: it.aVontade,
-          alimento: { id: it.alimento.id, nome: it.alimento.nome },
+          idGrupoSubstituicao: it.idGrupoSubstituicao ?? null,
+          alimento: {
+            id: it.alimento.id,
+            nome: it.alimento.nome,
+            nomeExibicao: it.alimento.nomeExibicao,
+            calorias: it.alimento.calorias,
+            proteinas: it.alimento.proteinas,
+            carboidratos: it.alimento.carboidratos,
+            gorduras: it.alimento.gorduras,
+            fibras: it.alimento.fibras,
+            sodio: it.alimento.sodio,
+            medidasCaseiras: it.alimento.medidasCaseiras.map((m) => ({
+              id: m.id,
+              nome: m.nome,
+              gramas: Number(m.gramas),
+              padrao: m.padrao,
+              ordem: m.ordem,
+            })),
+          },
+          substitutos: (it.substitutos ?? []).map((s) => ({
+            idAlimento: s.idAlimento,
+            quantidadeGramas: s.quantidadeGramas ?? 0,
+            medidaCaseira: s.medidaCaseira ?? null,
+            idMedidaCaseira: s.idMedidaCaseira ?? null,
+            quantidadeMedida: s.quantidadeMedida ?? null,
+            aVontade: s.aVontade,
+            alimento: {
+              id: s.alimento.id,
+              nome: s.alimento.nome,
+              nomeExibicao: s.alimento.nomeExibicao,
+              calorias: s.alimento.calorias,
+              proteinas: s.alimento.proteinas,
+              carboidratos: s.alimento.carboidratos,
+              gorduras: s.alimento.gorduras,
+            },
+          })),
         })),
       })),
     };
@@ -200,7 +290,7 @@ export class PlanosAlimentaresService {
       (dto.refeicoesPlanejadas?.length ? 'POR_ALIMENTOS' : 'QUALITATIVO');
 
     // Normaliza o payload já no shape do Prisma.
-      const refeicoes = (dto.refeicoesPlanejadas ?? []).map((r) => ({
+    const refeicoes = (dto.refeicoesPlanejadas ?? []).map((r) => ({
       nome: r.nome,
       horarioSugerido: r.horarioSugerido
         ? horarioParaDate(r.horarioSugerido)
@@ -213,6 +303,17 @@ export class PlanosAlimentaresService {
         quantidadeMedida: i.quantidadeMedida ?? null,
         aVontade: i.aVontade ?? false,
         idGrupoSubstituicao: i.idGrupoSubstituicao ?? null,
+        substitutos: {
+          create: (i.substitutos ?? []).map((s, idx) => ({
+            idAlimento: s.idAlimento,
+            quantidadeGramas: s.quantidadeGramas ?? null,
+            medidaCaseira: s.medidaCaseira ?? null,
+            idMedidaCaseira: s.idMedidaCaseira ?? null,
+            quantidadeMedida: s.quantidadeMedida ?? null,
+            aVontade: s.aVontade ?? false,
+            ordem: s.ordem ?? idx,
+          })),
+        },
       })),
     }));
 
@@ -269,9 +370,7 @@ export class PlanosAlimentaresService {
         include: {
           refeicoesPlanejadas: {
             orderBy: { horarioSugerido: 'asc' },
-            include: {
-              itensDieta: { include: { alimento: true } },
-            },
+            include: { itensDieta: { include: ITENS_INCLUDE } },
           },
         },
       });
@@ -286,7 +385,6 @@ export class PlanosAlimentaresService {
     });
     if (!plano) throw new NotFoundException('Plano não encontrado');
     await this.pacientesService.findOne(plano.idPaciente, user);
-
     await this.prisma.planoAlimentar.delete({ where: { id } });
     return { ok: true, id };
   }
@@ -301,7 +399,11 @@ export class PlanosAlimentaresService {
       include: {
         refeicoesPlanejadas: {
           orderBy: { horarioSugerido: 'asc' },
-          include: { itensDieta: true },
+          include: {
+            itensDieta: {
+              include: { substitutos: { orderBy: { ordem: 'asc' } } },
+            },
+          },
         },
       },
     });
@@ -334,12 +436,25 @@ export class PlanosAlimentaresService {
                 quantidadeMedida: i.quantidadeMedida,
                 aVontade: i.aVontade,
                 idGrupoSubstituicao: i.idGrupoSubstituicao,
+                substitutos: {
+                  create: (i.substitutos ?? []).map((s) => ({
+                    idAlimento: s.idAlimento,
+                    quantidadeGramas: s.quantidadeGramas,
+                    medidaCaseira: s.medidaCaseira,
+                    idMedidaCaseira: s.idMedidaCaseira,
+                    quantidadeMedida: s.quantidadeMedida,
+                    aVontade: s.aVontade,
+                    ordem: s.ordem,
+                  })),
+                },
               })),
             },
           })),
         },
       },
-      include: { refeicoesPlanejadas: { include: { itensDieta: true } } },
+      include: {
+        refeicoesPlanejadas: { include: { itensDieta: true } },
+      },
     });
   }
 
@@ -355,7 +470,6 @@ export class PlanosAlimentaresService {
     });
     if (!plano) throw new NotFoundException('Plano não encontrado');
     await this.pacientesService.findOne(plano.idPaciente, user);
-
     return this.prisma.planoAlimentar.update({
       where: { id },
       data: { ativo },
@@ -383,11 +497,12 @@ export class PlanosAlimentaresService {
       select: { id: true, nome: true },
     });
   }
+
   /**
    * Edita o plano. Se `refeicoesPlanejadas` vier no payload, substitui TODAS
    * as refeições (apaga e recria). Sem esse campo, só os dados do plano mudam.
    */
-    async atualizarPlano(
+  async atualizarPlano(
     id: number,
     dto: UpdatePlanoAlimentarDto,
     user: JwtPayloadUser,
@@ -415,6 +530,17 @@ export class PlanosAlimentaresService {
           quantidadeMedida: i.quantidadeMedida ?? null,
           aVontade: i.aVontade ?? false,
           idGrupoSubstituicao: i.idGrupoSubstituicao ?? null,
+          substitutos: {
+            create: (i.substitutos ?? []).map((s, idx) => ({
+              idAlimento: s.idAlimento,
+              quantidadeGramas: s.quantidadeGramas ?? null,
+              medidaCaseira: s.medidaCaseira ?? null,
+              idMedidaCaseira: s.idMedidaCaseira ?? null,
+              quantidadeMedida: s.quantidadeMedida ?? null,
+              aVontade: s.aVontade ?? false,
+              ordem: s.ordem ?? idx,
+            })),
+          },
         })),
       }));
 
@@ -472,9 +598,7 @@ export class PlanosAlimentaresService {
           include: {
             refeicoesPlanejadas: {
               orderBy: { horarioSugerido: 'asc' },
-              include: {
-                itensDieta: { include: { alimento: true } },
-              },
+              include: { itensDieta: { include: ITENS_INCLUDE } },
             },
           },
         });
@@ -496,13 +620,12 @@ export class PlanosAlimentaresService {
       include: {
         refeicoesPlanejadas: {
           orderBy: { horarioSugerido: 'asc' },
-          include: {
-            itensDieta: { include: { alimento: true } },
-          },
+          include: { itensDieta: { include: ITENS_INCLUDE } },
         },
       },
     });
   }
+
   /** Todos os planos disponíveis do paciente (pode haver mais de um). */
   async findPlanosDisponiveisByPaciente(user: JwtPayloadUser) {
     if (user.perfil !== 'paciente') {
@@ -516,19 +639,30 @@ export class PlanosAlimentaresService {
       include: {
         refeicoesPlanejadas: {
           orderBy: { horarioSugerido: 'asc' },
-          include: { itensDieta: { include: { alimento: true } } },
+          include: { itensDieta: { include: ITENS_INCLUDE } },
         },
       },
     });
   }
 
-  async getShoppingList(idPlano: number, user: JwtPayloadUser) {
+    async getShoppingList(
+    idPlano: number,
+    user: JwtPayloadUser,
+  ): Promise<ListaComprasResult> {
     const plano = await this.prisma.planoAlimentar.findUnique({
       where: { id: idPlano },
       include: {
         refeicoesPlanejadas: {
           include: {
-            itensDieta: { include: { alimento: true } },
+            itensDieta: {
+              include: {
+                alimento: true,
+                substitutos: {
+                  orderBy: { ordem: 'asc' },
+                  include: { alimento: true },
+                },
+              },
+            },
           },
         },
       },
@@ -536,44 +670,61 @@ export class PlanosAlimentaresService {
     if (!plano) throw new NotFoundException('Plano não encontrado');
     await this.pacientesService.findOne(plano.idPaciente, user);
 
-    const map = new Map<
-      number,
-      {
-        idAlimento: number;
-        nome: string;
-        nomeExibicao: string;
-        totalGramas: number;
-        aVontade: boolean;
-      }
-    >();
+    const map = new Map<number, ItemListaCompras>();
 
     for (const ref of plano.refeicoesPlanejadas) {
       for (const item of ref.itensDieta) {
-        const existing = map.get(item.idAlimento);
-        if (existing) {
-          existing.totalGramas += item.quantidadeGramas ?? 0;
-          if (item.aVontade) existing.aVontade = true;
-        } else {
-          map.set(item.idAlimento, {
+        let principal = map.get(item.idAlimento);
+        if (!principal) {
+          principal = {
             idAlimento: item.idAlimento,
             nome: item.alimento.nome,
             nomeExibicao: limparNomeAlimento(item.alimento.nome),
-            totalGramas: item.quantidadeGramas ?? 0,
-            aVontade: item.aVontade,
-          });
+            totalGramas: 0,
+            aVontade: false,
+            substitutos: [],
+          };
+          map.set(item.idAlimento, principal);
+        }
+
+        principal.totalGramas += item.quantidadeGramas ?? 0;
+        if (item.aVontade) principal.aVontade = true;
+
+        for (const sub of item.substitutos ?? []) {
+          const existente = principal.substitutos.find(
+            (s) => s.idAlimento === sub.idAlimento,
+          );
+          if (existente) {
+            existente.totalGramas += sub.quantidadeGramas ?? 0;
+            if (sub.aVontade) existente.aVontade = true;
+          } else {
+            principal.substitutos.push({
+              idAlimento: sub.idAlimento,
+              nome: sub.alimento.nome,
+              nomeExibicao: limparNomeAlimento(sub.alimento.nome),
+              totalGramas: sub.quantidadeGramas ?? 0,
+              aVontade: sub.aVontade,
+            });
+          }
         }
       }
     }
 
+    const itens = [...map.values()]
+      .map((linha) => ({
+        ...linha,
+        substitutos: [...linha.substitutos].sort((a, b) =>
+          a.nomeExibicao.localeCompare(b.nomeExibicao, 'pt-BR'),
+        ),
+      }))
+      .sort((a, b) => a.nomeExibicao.localeCompare(b.nomeExibicao, 'pt-BR'));
+
     return {
       idPlano: plano.id,
       nomePlano: plano.nome,
-      itens: [...map.values()].sort((a, b) =>
-        a.nomeExibicao.localeCompare(b.nomeExibicao, 'pt-BR'),
-      ),
+      itens,
     };
   }
-
   /** Resumo do plano: Prescrito vs Necessidade Alvo (TMB × 1.55). */
   async getResumoComparativo(idPlano: number, user: JwtPayloadUser) {
     const plano = await this.prisma.planoAlimentar.findUnique({
@@ -595,6 +746,8 @@ export class PlanosAlimentaresService {
     let totalCho = 0;
     let totalLip = 0;
 
+    // Soma apenas os principais — o paciente consome uma opção por vez,
+    // então os substitutos não entram no total.
     for (const ref of plano.refeicoesPlanejadas) {
       for (const item of ref.itensDieta) {
         const fator = (item.quantidadeGramas ?? 0) / 100;

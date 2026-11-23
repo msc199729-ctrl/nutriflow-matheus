@@ -24,6 +24,9 @@ import { FinanceiroModule } from './financeiro/financeiro.module';
 import { TreinosModule } from './treinos/treinos.module';
 import { MetasModule } from './metas/metas.module';
 import { AnaliseModule } from './analise/analise.module';
+import { DocumentosModule } from './documentos/documentos.module';
+import { CalculoEnergeticoModule } from './calculo-energetico/calculo-energetico.module';
+
 
 @Module({
   imports: [
@@ -51,6 +54,9 @@ import { AnaliseModule } from './analise/analise.module';
     TreinosModule,
     MetasModule,
     AnaliseModule,
+    DocumentosModule,
+    CalculoEnergeticoModule,
+
   ],
   controllers: [AppController],
   providers: [

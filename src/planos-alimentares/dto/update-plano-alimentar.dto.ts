@@ -12,6 +12,36 @@ import {
   ValidateNested,
 } from 'class-validator';
 
+export class UpdateItemSubstitutoDto {
+  @IsInt()
+  idAlimento: number;
+
+  @IsOptional()
+  @IsNumber()
+  quantidadeGramas?: number | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  medidaCaseira?: string | null;
+
+  @IsOptional()
+  @IsString()
+  idMedidaCaseira?: string | null;
+
+  @IsOptional()
+  @IsNumber()
+  quantidadeMedida?: number | null;
+
+  @IsOptional()
+  @IsBoolean()
+  aVontade?: boolean;
+
+  @IsOptional()
+  @IsInt()
+  ordem?: number;
+}
+
 export class UpdateItemDietaDto {
   @IsInt()
   idAlimento: number;
@@ -22,6 +52,7 @@ export class UpdateItemDietaDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(120)
   medidaCaseira?: string | null;
 
   @IsOptional()
@@ -39,10 +70,17 @@ export class UpdateItemDietaDto {
   @IsOptional()
   @IsInt()
   idGrupoSubstituicao?: number | null;
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => UpdateItemSubstitutoDto)
+  substitutos?: UpdateItemSubstitutoDto[];
 }
 
 export class UpdateRefeicaoPlanejadaDto {
   @IsString()
+  @MaxLength(80)
   nome: string;
 
   @IsOptional()

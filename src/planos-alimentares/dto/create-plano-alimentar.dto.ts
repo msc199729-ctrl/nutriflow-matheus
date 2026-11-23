@@ -1,4 +1,4 @@
-﻿import { Type } from 'class-transformer';
+import { Type } from 'class-transformer';
 import {
   IsArray,
   IsBoolean,
@@ -7,11 +7,40 @@ import {
   IsNumber,
   IsOptional,
   IsString,
-  Matches,
   MaxLength,
   Min,
   ValidateNested,
 } from 'class-validator';
+
+export class ItemSubstitutoDto {
+  @IsInt()
+  idAlimento: number;
+
+  @IsOptional()
+  @IsNumber()
+  quantidadeGramas?: number | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  medidaCaseira?: string | null;
+
+  @IsOptional()
+  @IsString()
+  idMedidaCaseira?: string | null;
+
+  @IsOptional()
+  @IsNumber()
+  quantidadeMedida?: number | null;
+
+  @IsOptional()
+  @IsBoolean()
+  aVontade?: boolean;
+
+  @IsOptional()
+  @IsInt()
+  ordem?: number;
+}
 
 export class CreateItemDietaDto {
   @IsInt()
@@ -23,6 +52,7 @@ export class CreateItemDietaDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(120)
   medidaCaseira?: string | null;
 
   @IsOptional()
@@ -40,15 +70,21 @@ export class CreateItemDietaDto {
   @IsOptional()
   @IsInt()
   idGrupoSubstituicao?: number | null;
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ItemSubstitutoDto)
+  substitutos?: ItemSubstitutoDto[];
 }
 
 export class CreateRefeicaoPlanejadaDto {
   @IsString()
+  @MaxLength(80)
   nome: string;
 
   @IsOptional()
   @IsString()
-  @Matches(/^\d{2}:\d{2}$/)
   horarioSugerido?: string;
 
   @IsArray()
