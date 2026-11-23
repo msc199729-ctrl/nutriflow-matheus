@@ -1,18 +1,59 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+﻿import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { PerfilUsuario } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import type { JwtPayloadUser } from '../common/decorators/current-user.decorator';
 import { PacientesService } from '../pacientes/pacientes.service';
 import { CreatePlanoAlimentarDto } from './dto/create-plano-alimentar.dto';
+import { UpdatePlanoAlimentarDto } from './dto/update-plano-alimentar.dto';
 import {
   calcularTmbMifflinStJeor,
   idadeEmAnos,
 } from '../physical-evaluations/physical-evaluations-calc.service';
 import { limparNomeAlimento } from '../foods/foods.service';
 
+/** Include padrão de itens — sempre com alimento e substitutos. */
+const ITENS_INCLUDE = {
+  alimento: true,
+  substitutos: {
+    include: { alimento: true },
+    orderBy: { ordem: 'asc' as const },
+  },
+};
+
+/** Remove acentos para o regex funcionar com "Café" e "Cafe". */
+function semAcento(texto: string | null | undefined): string {
+  return (texto ?? '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim();
+}
+
 function horarioParaDate(horario: string): Date {
   const [h, m] = horario.split(':').map((x) => parseInt(x, 10));
   return new Date(1970, 0, 1, h, m, 0, 0);
+}
+
+/** Infere horário clínico pelo nome quando o usuário não informa. */
+function horarioPorNome(
+  nome: string | null | undefined,
+  fallback = '12:00',
+): Date {
+  const n = semAcento(nome);
+  if (/cafe|manha|breakfast|desjejum/.test(n)) return horarioParaDate('08:00');
+  if (/colacao|colac/.test(n)) return horarioParaDate('10:00');
+  if (/almoco|lunch/.test(n)) return horarioParaDate('12:30');
+  if (/lanche.*tarde|tarde/.test(n)) return horarioParaDate('16:00');
+  if (/jantar|janta|dinner|noite/.test(n)) return horarioParaDate('19:30');
+  if (/ceia|supper/.test(n)) return horarioParaDate('22:00');
+  if (/pre.*treino|pre.*workout/.test(n)) return horarioParaDate('06:00');
+  if (/pos.*treino|pos.*workout/.test(n)) return horarioParaDate('19:00');
+  return horarioParaDate(fallback);
 }
 
 function formatHorarioDoBanco(d: Date | null): string {
@@ -22,6 +63,29 @@ function formatHorarioDoBanco(d: Date | null): string {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }
 
+export interface LinhaSubstituto {
+  idAlimento: number;
+  nome: string;
+  nomeExibicao: string;
+  totalGramas: number;
+  aVontade: boolean;
+}
+
+export interface ItemListaCompras {
+  idAlimento: number;
+  nome: string;
+  nomeExibicao: string;
+  totalGramas: number;
+  aVontade: boolean;
+  substitutos: LinhaSubstituto[];
+}
+
+export interface ListaComprasResult {
+  idPlano: number;
+  nomePlano: string | null;
+  itens: ItemListaCompras[];
+}
+
 @Injectable()
 export class PlanosAlimentaresService {
   constructor(
@@ -29,36 +93,55 @@ export class PlanosAlimentaresService {
     private readonly pacientesService: PacientesService,
   ) {}
 
-  async findPlanoAtivoByPaciente(user: JwtPayloadUser) {
+  async findPlanosAtivosByPaciente(user: JwtPayloadUser) {
     if (user.perfil !== 'paciente') {
-      throw new ForbiddenException('Apenas o paciente pode consultar seu plano ativo');
+      throw new ForbiddenException(
+        'Apenas o paciente pode consultar seus planos',
+      );
     }
     const hoje = new Date();
-    const plano = await this.prisma.planoAlimentar.findFirst({
+    return this.prisma.planoAlimentar.findMany({
       where: {
         idPaciente: user.sub,
         ativo: true,
         AND: [
-          {
-            OR: [{ dataFim: null }, { dataFim: { gte: hoje } }],
-          },
-          {
-            OR: [{ dataInicio: null }, { dataInicio: { lte: hoje } }],
-          },
+          { OR: [{ dataFim: null }, { dataFim: { gte: hoje } }] },
+          { OR: [{ dataInicio: null }, { dataInicio: { lte: hoje } }] },
+        ],
+      },
+      orderBy: { id: 'desc' },
+      include: {
+        refeicoesPlanejadas: {
+          orderBy: { horarioSugerido: 'asc' },
+          include: { itensDieta: { include: ITENS_INCLUDE } },
+        },
+      },
+    });
+  }
+
+  async findPlanoAtivoByPaciente(user: JwtPayloadUser) {
+    if (user.perfil !== 'paciente') {
+      throw new ForbiddenException(
+        'Apenas o paciente pode consultar seu plano ativo',
+      );
+    }
+    const hoje = new Date();
+    return this.prisma.planoAlimentar.findFirst({
+      where: {
+        idPaciente: user.sub,
+        ativo: true,
+        AND: [
+          { OR: [{ dataFim: null }, { dataFim: { gte: hoje } }] },
+          { OR: [{ dataInicio: null }, { dataInicio: { lte: hoje } }] },
         ],
       },
       include: {
         refeicoesPlanejadas: {
           orderBy: { horarioSugerido: 'asc' },
-          include: {
-            itensDieta: {
-              include: { alimento: true },
-            },
-          },
+          include: { itensDieta: { include: ITENS_INCLUDE } },
         },
       },
     });
-    return plano;
   }
 
   async listByPaciente(idPaciente: number, user: JwtPayloadUser) {
@@ -96,15 +179,35 @@ export class PlanosAlimentaresService {
         refeicoesPlanejadas: {
           orderBy: { horarioSugerido: 'asc' },
           include: {
-            itensDieta: { include: { alimento: true } },
+            itensDieta: {
+              include: {
+                substitutos: {
+                  include: { alimento: true },
+                  orderBy: { ordem: 'asc' },
+                },
+                alimento: {
+                  include: {
+                    medidasCaseiras: {
+                      orderBy: [{ padrao: 'desc' }, { ordem: 'asc' }],
+                      select: {
+                        id: true,
+                        nome: true,
+                        gramas: true,
+                        padrao: true,
+                        ordem: true,
+                      },
+                    },
+                  },
+                },
+              },
+            },
           },
         },
       },
     });
-    if (!plano) {
-      throw new NotFoundException('Plano não encontrado');
-    }
+    if (!plano) throw new NotFoundException('Plano não encontrado');
     await this.pacientesService.findOne(plano.idPaciente, user);
+
     return {
       id: plano.id,
       idPaciente: plano.idPaciente,
@@ -123,82 +226,183 @@ export class PlanosAlimentaresService {
           idAlimento: it.idAlimento,
           quantidadeGramas: it.quantidadeGramas ?? 0,
           medidaCaseira: it.medidaCaseira ?? null,
+          idMedidaCaseira: it.idMedidaCaseira ?? null,
+          quantidadeMedida: it.quantidadeMedida ?? null,
           aVontade: it.aVontade,
-          alimento: { id: it.alimento.id, nome: it.alimento.nome },
+          idGrupoSubstituicao: it.idGrupoSubstituicao ?? null,
+          alimento: {
+            id: it.alimento.id,
+            nome: it.alimento.nome,
+            nomeExibicao: it.alimento.nomeExibicao,
+            calorias: it.alimento.calorias,
+            proteinas: it.alimento.proteinas,
+            carboidratos: it.alimento.carboidratos,
+            gorduras: it.alimento.gorduras,
+            fibras: it.alimento.fibras,
+            sodio: it.alimento.sodio,
+            medidasCaseiras: it.alimento.medidasCaseiras.map((m) => ({
+              id: m.id,
+              nome: m.nome,
+              gramas: Number(m.gramas),
+              padrao: m.padrao,
+              ordem: m.ordem,
+            })),
+          },
+          substitutos: (it.substitutos ?? []).map((s) => ({
+            idAlimento: s.idAlimento,
+            quantidadeGramas: s.quantidadeGramas ?? 0,
+            medidaCaseira: s.medidaCaseira ?? null,
+            idMedidaCaseira: s.idMedidaCaseira ?? null,
+            quantidadeMedida: s.quantidadeMedida ?? null,
+            aVontade: s.aVontade,
+            alimento: {
+              id: s.alimento.id,
+              nome: s.alimento.nome,
+              nomeExibicao: s.alimento.nomeExibicao,
+              calorias: s.alimento.calorias,
+              proteinas: s.alimento.proteinas,
+              carboidratos: s.alimento.carboidratos,
+              gorduras: s.alimento.gorduras,
+            },
+          })),
         })),
       })),
     };
   }
 
-  async createPlanoNutricionista(dto: CreatePlanoAlimentarDto, user: JwtPayloadUser) {
+  async createPlanoNutricionista(
+    dto: CreatePlanoAlimentarDto,
+    user: JwtPayloadUser,
+  ) {
     if (
       user.perfil !== PerfilUsuario.nutricionista &&
       user.perfil !== PerfilUsuario.admin_clinica
     ) {
-      throw new ForbiddenException('Apenas nutricionista ou gestor da clínica pode criar planos');
+      throw new ForbiddenException(
+        'Apenas nutricionista ou gestor da clínica pode criar planos',
+      );
     }
 
     const paciente = await this.pacientesService.findOne(dto.idPaciente, user);
 
+    const tipoPlano =
+      dto.tipoPlano ??
+      (dto.refeicoesPlanejadas?.length ? 'POR_ALIMENTOS' : 'QUALITATIVO');
+
+    // Normaliza o payload já no shape do Prisma.
+    const refeicoes = (dto.refeicoesPlanejadas ?? []).map((r) => ({
+      nome: r.nome,
+      horarioSugerido: r.horarioSugerido
+        ? horarioParaDate(r.horarioSugerido)
+        : horarioPorNome(r.nome),
+      itensDieta: (r.itensDieta ?? []).map((i) => ({
+        idAlimento: i.idAlimento,
+        quantidadeGramas: i.quantidadeGramas ?? null,
+        medidaCaseira: i.medidaCaseira ?? null,
+        idMedidaCaseira: i.idMedidaCaseira ?? null,
+        quantidadeMedida: i.quantidadeMedida ?? null,
+        aVontade: i.aVontade ?? false,
+        idGrupoSubstituicao: i.idGrupoSubstituicao ?? null,
+        substitutos: {
+          create: (i.substitutos ?? []).map((s, idx) => ({
+            idAlimento: s.idAlimento,
+            quantidadeGramas: s.quantidadeGramas ?? null,
+            medidaCaseira: s.medidaCaseira ?? null,
+            idMedidaCaseira: s.idMedidaCaseira ?? null,
+            quantidadeMedida: s.quantidadeMedida ?? null,
+            aVontade: s.aVontade ?? false,
+            ordem: s.ordem ?? idx,
+          })),
+        },
+      })),
+    }));
+
+    if (tipoPlano === 'POR_ALIMENTOS' && refeicoes.length === 0) {
+      throw new BadRequestException(
+        'Plano por alimentos precisa de ao menos uma refeição.',
+      );
+    }
+
+    const nomes = refeicoes
+      .map((r) => (r.nome ?? '').trim().toLowerCase())
+      .filter((n) => n.length > 0);
+    const repetido = nomes.find((n, i) => nomes.indexOf(n) !== i);
+    if (repetido) {
+      throw new BadRequestException(
+        `Refeição duplicada no plano: "${repetido}". Renomeie antes de salvar.`,
+      );
+    }
+
+    const semCalorias = refeicoes.find(
+      (r) =>
+        r.itensDieta.filter(
+          (i) => !i.aVontade && (i.quantidadeGramas ?? 0) > 0,
+        ).length === 0,
+    );
+    if (semCalorias) {
+      throw new BadRequestException(
+        `Refeição "${semCalorias.nome}" não tem alimentos com quantidade. Adicione ou remova.`,
+      );
+    }
+
     return this.prisma.$transaction(async (tx) => {
-      await tx.planoAlimentar.updateMany({
-        where: { idPaciente: dto.idPaciente, ativo: true },
-        data: { ativo: false },
-      });
-
-      const refeicoesPlanejadas =
-        dto.tipoPlano === 'POR_ALIMENTOS' && dto.refeicoes?.length
-          ? {
-              create: dto.refeicoes.map((r) => ({
-                nome: r.nome,
-                horarioSugerido: horarioParaDate(r.horario),
-                itensDieta: {
-                  create: r.itens.map((i) => ({
-                    idAlimento: i.idAlimento,
-                    quantidadeGramas: i.quantidadeGramas ?? null,
-                    medidaCaseira: i.medidaCaseira ?? null,
-                    aVontade: i.aVontade ?? false,
-                    idGrupoSubstituicao: i.idGrupoSubstituicao ?? null,
-                  })),
-                },
-              })),
-            }
-          : undefined;
-
       return tx.planoAlimentar.create({
         data: {
           idPaciente: dto.idPaciente,
           idNutricionista: paciente.idNutricionista,
           nome: dto.nome ?? null,
-          tipoPlano: dto.tipoPlano,
+          tipoPlano,
           descricaoQualitativa: dto.descricaoQualitativa ?? null,
           ativo: true,
           dataInicio: new Date(),
           metaAguaLitros: dto.metaAguaLitros ?? null,
-          refeicoesPlanejadas,
+          refeicoesPlanejadas:
+            tipoPlano === 'POR_ALIMENTOS' && refeicoes.length > 0
+              ? {
+                  create: refeicoes.map((r) => ({
+                    nome: r.nome,
+                    horarioSugerido: r.horarioSugerido,
+                    itensDieta: { create: r.itensDieta },
+                  })),
+                }
+              : undefined,
         },
         include: {
           refeicoesPlanejadas: {
             orderBy: { horarioSugerido: 'asc' },
-            include: {
-              itensDieta: { include: { alimento: true } },
-            },
+            include: { itensDieta: { include: ITENS_INCLUDE } },
           },
         },
       });
     });
   }
 
-  /**
-   * Gera lista de compras consolidada: soma quantidades por alimento.
-   */
-  async getShoppingList(idPlano: number, user: JwtPayloadUser) {
+  /** Exclui um plano. Não promove nenhum outro automaticamente. */
+  async removePlano(id: number, user: JwtPayloadUser) {
     const plano = await this.prisma.planoAlimentar.findUnique({
-      where: { id: idPlano },
+      where: { id },
+      select: { idPaciente: true },
+    });
+    if (!plano) throw new NotFoundException('Plano não encontrado');
+    await this.pacientesService.findOne(plano.idPaciente, user);
+    await this.prisma.planoAlimentar.delete({ where: { id } });
+    return { ok: true, id };
+  }
+
+  /**
+   * Duplica como RASCUNHO (inativo).
+   * O plano atual do paciente continua no ar até você promover a cópia.
+   */
+  async duplicarPlano(id: number, user: JwtPayloadUser) {
+    const plano = await this.prisma.planoAlimentar.findUnique({
+      where: { id },
       include: {
         refeicoesPlanejadas: {
+          orderBy: { horarioSugerido: 'asc' },
           include: {
-            itensDieta: { include: { alimento: true } },
+            itensDieta: {
+              include: { substitutos: { orderBy: { ordem: 'asc' } } },
+            },
           },
         },
       },
@@ -206,45 +410,322 @@ export class PlanosAlimentaresService {
     if (!plano) throw new NotFoundException('Plano não encontrado');
     await this.pacientesService.findOne(plano.idPaciente, user);
 
-    const map = new Map<number, {
-      idAlimento: number;
-      nome: string;
-      nomeExibicao: string;
-      totalGramas: number;
-      aVontade: boolean;
-    }>();
+    // Mantém nome + " (cópia)" dentro do limite de 80 do DTO de renomear.
+    const base = (plano.nome ?? 'Plano').slice(0, 70);
+
+    return this.prisma.planoAlimentar.create({
+      data: {
+        idPaciente: plano.idPaciente,
+        idNutricionista: plano.idNutricionista,
+        nome: `${base} (cópia)`,
+        tipoPlano: plano.tipoPlano,
+        descricaoQualitativa: plano.descricaoQualitativa,
+        ativo: false,
+        dataInicio: new Date(),
+        metaAguaLitros: plano.metaAguaLitros,
+        refeicoesPlanejadas: {
+          create: plano.refeicoesPlanejadas.map((r) => ({
+            nome: r.nome,
+            horarioSugerido: r.horarioSugerido,
+            itensDieta: {
+              create: r.itensDieta.map((i) => ({
+                idAlimento: i.idAlimento,
+                quantidadeGramas: i.quantidadeGramas,
+                medidaCaseira: i.medidaCaseira,
+                idMedidaCaseira: i.idMedidaCaseira,
+                quantidadeMedida: i.quantidadeMedida,
+                aVontade: i.aVontade,
+                idGrupoSubstituicao: i.idGrupoSubstituicao,
+                substitutos: {
+                  create: (i.substitutos ?? []).map((s) => ({
+                    idAlimento: s.idAlimento,
+                    quantidadeGramas: s.quantidadeGramas,
+                    medidaCaseira: s.medidaCaseira,
+                    idMedidaCaseira: s.idMedidaCaseira,
+                    quantidadeMedida: s.quantidadeMedida,
+                    aVontade: s.aVontade,
+                    ordem: s.ordem,
+                  })),
+                },
+              })),
+            },
+          })),
+        },
+      },
+      include: {
+        refeicoesPlanejadas: { include: { itensDieta: true } },
+      },
+    });
+  }
+
+  /** Liga ou desliga um plano. Não mexe nos outros. */
+  async definirDisponibilidade(
+    id: number,
+    ativo: boolean,
+    user: JwtPayloadUser,
+  ) {
+    const plano = await this.prisma.planoAlimentar.findUnique({
+      where: { id },
+      select: { idPaciente: true },
+    });
+    if (!plano) throw new NotFoundException('Plano não encontrado');
+    await this.pacientesService.findOne(plano.idPaciente, user);
+    return this.prisma.planoAlimentar.update({
+      where: { id },
+      data: { ativo },
+      select: { id: true, ativo: true },
+    });
+  }
+
+  /** Renomeia apenas o nome do plano. Não toca em refeições, itens ou disponibilidade. */
+  async renomearPlano(id: number, nome: string, user: JwtPayloadUser) {
+    const plano = await this.prisma.planoAlimentar.findUnique({
+      where: { id },
+      select: { idPaciente: true },
+    });
+    if (!plano) throw new NotFoundException('Plano não encontrado');
+    await this.pacientesService.findOne(plano.idPaciente, user);
+
+    const limpo = nome?.trim();
+    if (!limpo) {
+      throw new BadRequestException('O nome do plano não pode ficar vazio.');
+    }
+
+    return this.prisma.planoAlimentar.update({
+      where: { id },
+      data: { nome: limpo },
+      select: { id: true, nome: true },
+    });
+  }
+
+  /**
+   * Edita o plano. Se `refeicoesPlanejadas` vier no payload, substitui TODAS
+   * as refeições (apaga e recria). Sem esse campo, só os dados do plano mudam.
+   */
+  async atualizarPlano(
+    id: number,
+    dto: UpdatePlanoAlimentarDto,
+    user: JwtPayloadUser,
+  ) {
+    const plano = await this.prisma.planoAlimentar.findUnique({
+      where: { id },
+      select: { id: true, idPaciente: true, tipoPlano: true },
+    });
+    if (!plano) throw new NotFoundException('Plano não encontrado');
+    await this.pacientesService.findOne(plano.idPaciente, user);
+
+    const tipoPlano = dto.tipoPlano ?? plano.tipoPlano;
+
+    if (dto.refeicoesPlanejadas) {
+      const refeicoes = dto.refeicoesPlanejadas.map((r) => ({
+        nome: r.nome,
+        horarioSugerido: r.horarioSugerido
+          ? horarioParaDate(r.horarioSugerido)
+          : horarioPorNome(r.nome),
+        itensDieta: (r.itensDieta ?? []).map((i) => ({
+          idAlimento: i.idAlimento,
+          quantidadeGramas: i.quantidadeGramas ?? null,
+          medidaCaseira: i.medidaCaseira ?? null,
+          idMedidaCaseira: i.idMedidaCaseira ?? null,
+          quantidadeMedida: i.quantidadeMedida ?? null,
+          aVontade: i.aVontade ?? false,
+          idGrupoSubstituicao: i.idGrupoSubstituicao ?? null,
+          substitutos: {
+            create: (i.substitutos ?? []).map((s, idx) => ({
+              idAlimento: s.idAlimento,
+              quantidadeGramas: s.quantidadeGramas ?? null,
+              medidaCaseira: s.medidaCaseira ?? null,
+              idMedidaCaseira: s.idMedidaCaseira ?? null,
+              quantidadeMedida: s.quantidadeMedida ?? null,
+              aVontade: s.aVontade ?? false,
+              ordem: s.ordem ?? idx,
+            })),
+          },
+        })),
+      }));
+
+      if (tipoPlano === 'POR_ALIMENTOS' && refeicoes.length === 0) {
+        throw new BadRequestException(
+          'Plano por alimentos precisa de ao menos uma refeição.',
+        );
+      }
+
+      const nomes = refeicoes
+        .map((r) => (r.nome ?? '').trim().toLowerCase())
+        .filter((n) => n.length > 0);
+      const repetido = nomes.find((n, i) => nomes.indexOf(n) !== i);
+      if (repetido) {
+        throw new BadRequestException(
+          `Refeição duplicada no plano: "${repetido}". Renomeie antes de salvar.`,
+        );
+      }
+
+      const semCalorias = refeicoes.find(
+        (r) =>
+          r.itensDieta.filter(
+            (i) => !i.aVontade && (i.quantidadeGramas ?? 0) > 0,
+          ).length === 0,
+      );
+      if (semCalorias) {
+        throw new BadRequestException(
+          `Refeição "${semCalorias.nome}" não tem alimentos com quantidade. Adicione ou remova.`,
+        );
+      }
+
+      return this.prisma.$transaction(async (tx) => {
+        return tx.planoAlimentar.update({
+          where: { id },
+          data: {
+            ...(dto.nome !== undefined
+              ? { nome: dto.nome?.trim() || null }
+              : {}),
+            ...(dto.tipoPlano !== undefined ? { tipoPlano } : {}),
+            ...(dto.descricaoQualitativa !== undefined
+              ? { descricaoQualitativa: dto.descricaoQualitativa }
+              : {}),
+            ...(dto.metaAguaLitros !== undefined
+              ? { metaAguaLitros: dto.metaAguaLitros }
+              : {}),
+            refeicoesPlanejadas: {
+              deleteMany: {},
+              create: refeicoes.map((r) => ({
+                nome: r.nome,
+                horarioSugerido: r.horarioSugerido,
+                itensDieta: { create: r.itensDieta },
+              })),
+            },
+          },
+          include: {
+            refeicoesPlanejadas: {
+              orderBy: { horarioSugerido: 'asc' },
+              include: { itensDieta: { include: ITENS_INCLUDE } },
+            },
+          },
+        });
+      });
+    }
+
+    return this.prisma.planoAlimentar.update({
+      where: { id },
+      data: {
+        ...(dto.nome !== undefined ? { nome: dto.nome?.trim() || null } : {}),
+        ...(dto.tipoPlano !== undefined ? { tipoPlano } : {}),
+        ...(dto.descricaoQualitativa !== undefined
+          ? { descricaoQualitativa: dto.descricaoQualitativa }
+          : {}),
+        ...(dto.metaAguaLitros !== undefined
+          ? { metaAguaLitros: dto.metaAguaLitros }
+          : {}),
+      },
+      include: {
+        refeicoesPlanejadas: {
+          orderBy: { horarioSugerido: 'asc' },
+          include: { itensDieta: { include: ITENS_INCLUDE } },
+        },
+      },
+    });
+  }
+
+  /** Todos os planos disponíveis do paciente (pode haver mais de um). */
+  async findPlanosDisponiveisByPaciente(user: JwtPayloadUser) {
+    if (user.perfil !== 'paciente') {
+      throw new ForbiddenException(
+        'Apenas o paciente pode consultar seus planos',
+      );
+    }
+    return this.prisma.planoAlimentar.findMany({
+      where: { idPaciente: user.sub, ativo: true },
+      orderBy: { dataInicio: 'desc' },
+      include: {
+        refeicoesPlanejadas: {
+          orderBy: { horarioSugerido: 'asc' },
+          include: { itensDieta: { include: ITENS_INCLUDE } },
+        },
+      },
+    });
+  }
+
+    async getShoppingList(
+    idPlano: number,
+    user: JwtPayloadUser,
+  ): Promise<ListaComprasResult> {
+    const plano = await this.prisma.planoAlimentar.findUnique({
+      where: { id: idPlano },
+      include: {
+        refeicoesPlanejadas: {
+          include: {
+            itensDieta: {
+              include: {
+                alimento: true,
+                substitutos: {
+                  orderBy: { ordem: 'asc' },
+                  include: { alimento: true },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+    if (!plano) throw new NotFoundException('Plano não encontrado');
+    await this.pacientesService.findOne(plano.idPaciente, user);
+
+    const map = new Map<number, ItemListaCompras>();
 
     for (const ref of plano.refeicoesPlanejadas) {
       for (const item of ref.itensDieta) {
-        const existing = map.get(item.idAlimento);
-        if (existing) {
-          existing.totalGramas += item.quantidadeGramas ?? 0;
-          if (item.aVontade) existing.aVontade = true;
-        } else {
-          map.set(item.idAlimento, {
+        let principal = map.get(item.idAlimento);
+        if (!principal) {
+          principal = {
             idAlimento: item.idAlimento,
             nome: item.alimento.nome,
             nomeExibicao: limparNomeAlimento(item.alimento.nome),
-            totalGramas: item.quantidadeGramas ?? 0,
-            aVontade: item.aVontade,
-          });
+            totalGramas: 0,
+            aVontade: false,
+            substitutos: [],
+          };
+          map.set(item.idAlimento, principal);
+        }
+
+        principal.totalGramas += item.quantidadeGramas ?? 0;
+        if (item.aVontade) principal.aVontade = true;
+
+        for (const sub of item.substitutos ?? []) {
+          const existente = principal.substitutos.find(
+            (s) => s.idAlimento === sub.idAlimento,
+          );
+          if (existente) {
+            existente.totalGramas += sub.quantidadeGramas ?? 0;
+            if (sub.aVontade) existente.aVontade = true;
+          } else {
+            principal.substitutos.push({
+              idAlimento: sub.idAlimento,
+              nome: sub.alimento.nome,
+              nomeExibicao: limparNomeAlimento(sub.alimento.nome),
+              totalGramas: sub.quantidadeGramas ?? 0,
+              aVontade: sub.aVontade,
+            });
+          }
         }
       }
     }
 
+    const itens = [...map.values()]
+      .map((linha) => ({
+        ...linha,
+        substitutos: [...linha.substitutos].sort((a, b) =>
+          a.nomeExibicao.localeCompare(b.nomeExibicao, 'pt-BR'),
+        ),
+      }))
+      .sort((a, b) => a.nomeExibicao.localeCompare(b.nomeExibicao, 'pt-BR'));
+
     return {
       idPlano: plano.id,
       nomePlano: plano.nome,
-      itens: [...map.values()].sort((a, b) =>
-        a.nomeExibicao.localeCompare(b.nomeExibicao, 'pt-BR'),
-      ),
+      itens,
     };
   }
-
-  /**
-   * Retorna resumo do plano com comparação Prescrito vs Necessidade Alvo.
-   * O alvo é baseado na TMB (Mifflin-St Jeor) × fator atividade padrão 1.55.
-   */
+  /** Resumo do plano: Prescrito vs Necessidade Alvo (TMB × 1.55). */
   async getResumoComparativo(idPlano: number, user: JwtPayloadUser) {
     const plano = await this.prisma.planoAlimentar.findUnique({
       where: { id: idPlano },
@@ -265,10 +746,11 @@ export class PlanosAlimentaresService {
     let totalCho = 0;
     let totalLip = 0;
 
+    // Soma apenas os principais — o paciente consome uma opção por vez,
+    // então os substitutos não entram no total.
     for (const ref of plano.refeicoesPlanejadas) {
       for (const item of ref.itensDieta) {
-        const g = item.quantidadeGramas ?? 0;
-        const fator = g / 100;
+        const fator = (item.quantidadeGramas ?? 0) / 100;
         totalKcal += (item.alimento.calorias ?? 0) * fator;
         totalPtn += (item.alimento.proteinas ?? 0) * fator;
         totalCho += (item.alimento.carboidratos ?? 0) * fator;
@@ -292,12 +774,14 @@ export class PlanosAlimentaresService {
     const idade = idadeEmAnos(plano.paciente.dataNascimento);
 
     if (peso && alturaM && idade != null) {
-      const alturaCm = alturaM * 100;
-      const tmb = calcularTmbMifflinStJeor(peso, alturaCm, idade, plano.paciente.genero);
-      const fatorAtividade = 1.55;
-      alvoKcal = Math.round(tmb * fatorAtividade);
-      // Distribuição padrão: PTN 20%, CHO 55%, LIP 25%
-      alvoPtn = Math.round((alvoKcal * 0.20) / 4);
+      const tmb = calcularTmbMifflinStJeor(
+        peso,
+        alturaM > 3 ? alturaM : alturaM * 100,
+        idade,
+        plano.paciente.genero,
+      );
+      alvoKcal = Math.round(tmb * 1.55);
+      alvoPtn = Math.round((alvoKcal * 0.2) / 4);
       alvoCho = Math.round((alvoKcal * 0.55) / 4);
       alvoLip = Math.round((alvoKcal * 0.25) / 9);
     }

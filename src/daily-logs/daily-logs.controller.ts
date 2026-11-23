@@ -1,7 +1,10 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
+  Param,
+  ParseIntPipe,
   Post,
   Query,
   UploadedFile,
@@ -34,14 +37,16 @@ export class DailyLogsController {
   constructor(private readonly dailyLogsService: DailyLogsService) {}
 
   @Get()
-  @ApiQuery({ name: 'data', required: false, description: 'Data no formato YYYY-MM-DD (padrão: hoje)' })
-  @ApiResponse({ status: 200, description: 'Registros do dia e total de água (ml)' })
-  findByDay(
-    @Query('data') dataStr: string | undefined,
-    @CurrentUser() user: JwtPayloadUser,
-  ) {
-    return this.dailyLogsService.findByDay(user, dataStr);
-  }
+@ApiQuery({ name: 'data', required: false, description: 'Data no formato YYYY-MM-DD (padrão: hoje)' })
+@ApiQuery({ name: 'idPaciente', required: false, description: 'ID do paciente (obrigatório para nutricionista/admin)' })
+@ApiResponse({ status: 200, description: 'Registros do dia e total de água (ml)' })
+findByDay(
+  @Query('data') dataStr: string | undefined,
+  @Query('idPaciente') idPaciente: string | undefined,
+  @CurrentUser() user: JwtPayloadUser,
+) {
+  return this.dailyLogsService.findByDay(user, dataStr, idPaciente);
+}
 
   @Post()
   @UseInterceptors(
@@ -69,12 +74,25 @@ export class DailyLogsController {
   })
   @ApiResponse({ status: 201, description: 'Registro criado' })
   @ApiResponse({ status: 403, description: 'Acesso negado' })
-  async create(
+
+   async create(
     @Body() dto: CreateRegistroDiarioDto,
     @CurrentUser() user: JwtPayloadUser,
-    @UploadedFile() file?: { path?: string },
+    @UploadedFile() file?: { path?: string; filename?: string },
   ) {
-    const urlFotoPrato = file?.path ?? undefined;
+    const urlFotoPrato = file?.filename
+      ? `/uploads/registros/${file.filename}`
+      : undefined;
     return this.dailyLogsService.create(dto, user, urlFotoPrato);
   }
-}
+
+  @Delete(':id')
+  @ApiResponse({ status: 200, description: 'Registro removido' })
+  @ApiResponse({ status: 403, description: 'Acesso negado' })
+  remove(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: JwtPayloadUser,
+  ) {
+    return this.dailyLogsService.remove(user, id);
+  }
+} 

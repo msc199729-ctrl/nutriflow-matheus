@@ -1,3 +1,5 @@
+import express from 'express';
+import { join } from 'path';
 import 'dotenv/config';
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
@@ -5,7 +7,6 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
 import { existsSync, mkdirSync } from 'node:fs';
-import { join } from 'path';
 import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 
@@ -24,6 +25,7 @@ async function bootstrap() {
 
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
   app.useStaticAssets(pacienteFotoDir, { prefix: '/static/paciente-perfil/' });
+  app.use('/uploads', express.static(join(process.cwd(), 'uploads')));
 
   app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
   app.enableCors({

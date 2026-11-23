@@ -61,7 +61,7 @@ function rowToPrismaData(row: TbcaAlimentoRow) {
   };
 }
 
-const BATCH = 150;
+const BATCH = 50;
 
 export async function seedTbcaAlimentos(prisma: PrismaClient): Promise<void> {
   if (process.env.SKIP_TBCA_SEED === '1') {
@@ -88,32 +88,30 @@ export async function seedTbcaAlimentos(prisma: PrismaClient): Promise<void> {
   let lineNo = 0;
   const batch: TbcaAlimentoRow[] = [];
 
-  const flush = async () => {
+   const flush = async () => {
     if (batch.length === 0) return;
-    await prisma.$transaction(
-      batch.map((row) => {
-        const data = rowToPrismaData(row);
-        return prisma.baseAlimento.upsert({
-          where: { codigoTbca: row.codigo },
-          create: data,
-          update: {
-            nome: data.nome,
-            classeTbca: data.classeTbca,
-            fonte: data.fonte,
-            calorias: data.calorias,
-            carboidratos: data.carboidratos,
-            proteinas: data.proteinas,
-            gorduras: data.gorduras,
-            fibras: data.fibras,
-            sodio: data.sodio,
-          },
-        });
-      }),
-    );
+    for (const row of batch) {
+      const data = rowToPrismaData(row);
+      await prisma.baseAlimento.upsert({
+        where: { codigoTbca: row.codigo },
+        create: data,
+        update: {
+          nome: data.nome,
+          classeTbca: data.classeTbca,
+          fonte: data.fonte,
+          calorias: data.calorias,
+          carboidratos: data.carboidratos,
+          proteinas: data.proteinas,
+          gorduras: data.gorduras,
+          fibras: data.fibras,
+          sodio: data.sodio,
+        },
+      });
+    }
     count += batch.length;
+    console.log(`  ${count} alimentos processados...`);
     batch.length = 0;
   };
-
   const stream = fs.createReadStream(filePath, { encoding: 'utf8' });
   const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
 

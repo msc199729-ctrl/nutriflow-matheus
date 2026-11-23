@@ -82,7 +82,7 @@ enum StatusLancamentoFinanceiro {
   atrasado
 }
 
-/// Conselho de registro do profissional (número no campo `crn` da tabela).
+/// Conselho de registro do profissional (nÃºmero no campo `crn` da tabela).
 enum TipoConselho {
   crn
   crm
@@ -109,7 +109,7 @@ model Workspace {
 }
 
 // ---------------------------------------------------------------------------
-// Usuários e perfis
+// UsuÃ¡rios e perfis
 // ---------------------------------------------------------------------------
 
 model Usuario {
@@ -118,7 +118,7 @@ model Usuario {
   email        String    @unique
   senhaHash    String    @map("senha_hash")
   perfil       PerfilUsuario
-  /// Conta apta a acessar a API (nutricionistas vindos do cadastro público iniciam false até o admin_sistema aprovar).
+  /// Conta apta a acessar a API (nutricionistas vindos do cadastro pÃºblico iniciam false atÃ© o admin_sistema aprovar).
   contaAtiva   Boolean   @default(true) @map("conta_ativa")
   bloqueado    Boolean   @default(false)
   criadoEm     DateTime  @default(now()) @map("criado_em")
@@ -137,21 +137,21 @@ model Usuario {
 model Nutricionista {
   id     Int     @id
   nome   String?
-  /// Número do registro no conselho (CRN ou CRM, conforme `tipoConselho`).
+  /// NÃºmero do registro no conselho (CRN ou CRM, conforme `tipoConselho`).
   crn    String?
   tipoConselho TipoConselho @default(crn) @map("tipo_conselho")
 
   /// Plano contratado no SaaS (`basico`, `profissional`, `clinica`). Escolhido no cadastro ou pelo super administrador.
   planoSaas             String?   @map("plano_saas") @db.VarChar(32)
-  /// Dia do mês (1–28) em que vence a mensalidade.
+  /// Dia do mÃªs (1â€“28) em que vence a mensalidade.
   diaVencimentoSaas     Int?      @map("dia_vencimento_saas")
-  /// Último dia (inclusive) do período pago; após esta data o acesso do nutricionista é bloqueado até novo pagamento registrado.
+  /// Ãšltimo dia (inclusive) do perÃ­odo pago; apÃ³s esta data o acesso do nutricionista Ã© bloqueado atÃ© novo pagamento registrado.
   proximoVencimentoSaas DateTime? @db.Date @map("proximo_vencimento_saas")
   ultimoPagamentoSaasEm DateTime? @map("ultimo_pagamento_saas_em")
 
-  /// Nome da clínica informado no cadastro público (opcional), para o super admin criar/vincular o workspace correto.
+  /// Nome da clÃ­nica informado no cadastro pÃºblico (opcional), para o super admin criar/vincular o workspace correto.
   nomeClinicaCadastro String? @map("nome_clinica_cadastro") @db.VarChar(255)
-  /// CNPJ da clínica informado no cadastro público (opcional), apenas texto.
+  /// CNPJ da clÃ­nica informado no cadastro pÃºblico (opcional), apenas texto.
   cnpjClinicaCadastro String? @map("cnpj_clinica_cadastro") @db.VarChar(32)
 
   usuario              Usuario               @relation(fields: [id], references: [id], onDelete: Cascade)
@@ -174,7 +174,7 @@ model Paciente {
   genero            String?
   objetivo          String?
   notasClinicas     String?   @db.Text @map("notas_clinicas")
-  /// Caminho público servido em `/static/paciente-perfil/…` (ou URL absoluta).
+  /// Caminho pÃºblico servido em `/static/paciente-perfil/â€¦` (ou URL absoluta).
   urlFotoPerfil     String?   @map("url_foto_perfil")
 
   usuario           Usuario            @relation(fields: [id], references: [id], onDelete: Cascade)
@@ -196,6 +196,8 @@ model Paciente {
   @@index([workspaceId])
   @@index([idNutricionista])
   @@map("pacientes")
+  calculosEnergeticos CalculoEnergetico[]
+
 }
 
 model CobrancaPaciente {
@@ -252,7 +254,7 @@ model NotaClinica {
 }
 
 // ---------------------------------------------------------------------------
-// Avaliações físicas
+// AvaliaÃ§Ãµes fÃ­sicas
 // ---------------------------------------------------------------------------
 
 model AvaliacaoFisica {
@@ -260,7 +262,7 @@ model AvaliacaoFisica {
   idPaciente            Int      @map("id_paciente")
   data                  DateTime @default(now()) @db.Date
 
-  // Medidas básicas
+  // Medidas bÃ¡sicas
   peso                  Float?
   altura                Float?
   alturaSentadoCm       Float?   @map("altura_sentado_cm")
@@ -270,7 +272,7 @@ model AvaliacaoFisica {
   rcq                   Float?
   riscoMetabolicoRcq    String?  @map("risco_metabolico_rcq")
 
-  // Composição corporal
+  // ComposiÃ§Ã£o corporal
   percentualGordura     Float?   @map("percentual_gordura")
   classificacaoGordura  String?  @map("classificacao_gordura")
   massaGorduraKg        Float?   @map("massa_gordura_kg")
@@ -278,7 +280,7 @@ model AvaliacaoFisica {
   massaResidualKg       Float?   @map("massa_residual_kg")
   massaMuscularKg       Float?   @map("massa_muscular_kg")
 
-  // Dobras cutâneas (10 dobras) + protocolo
+  // Dobras cutÃ¢neas (10 dobras) + protocolo
   protocoloGordura      String?  @map("protocolo_gordura")
   somatorioDobrasMm     Float?   @map("somatorio_dobras_mm")
   dobraTricipital       Float?   @map("dobra_tricipital")
@@ -292,7 +294,7 @@ model AvaliacaoFisica {
   dobraCoxa             Float?   @map("dobra_coxa")
   dobraPanturrilha      Float?   @map("dobra_panturrilha")
 
-  // Bioimpedância
+  // BioimpedÃ¢ncia
   biaPercentualGordura  Float?   @map("bia_percentual_gordura")
   biaClassificacaoGordura String? @map("bia_classificacao_gordura")
   biaPercentualMassaMuscular Float? @map("bia_percentual_massa_muscular")
@@ -302,7 +304,7 @@ model AvaliacaoFisica {
   biaIndiceGorduraVisceral Float? @map("bia_indice_gordura_visceral")
   biaIdadeMetabolica    Int?     @map("bia_idade_metabolica")
 
-  // Circunferências únicas (tronco)
+  // CircunferÃªncias Ãºnicas (tronco)
   circPescoco           Float?   @map("circ_pescoco")
   circOmbro             Float?   @map("circ_ombro")
   circTorax             Float?   @map("circ_torax")
@@ -310,7 +312,7 @@ model AvaliacaoFisica {
   circAbdomen           Float?   @map("circ_abdomen")
   circQuadril           Float?   @map("circ_quadril")
 
-  // Circunferências bilaterais — Braço
+  // CircunferÃªncias bilaterais â€” BraÃ§o
   circBracoDirRelaxado    Float?   @map("circ_braco_dir_relaxado")
   circBracoEsqRelaxado    Float?   @map("circ_braco_esq_relaxado")
   circBracoDirContraido   Float?   @map("circ_braco_dir_contraido")
@@ -318,11 +320,11 @@ model AvaliacaoFisica {
   circBracoDirCmb         Float?   @map("circ_braco_dir_cmb")
   circBracoEsqCmb         Float?   @map("circ_braco_esq_cmb")
 
-  // Circunferências bilaterais — Antebraço
+  // CircunferÃªncias bilaterais â€” AntebraÃ§o
   circAntebracoDirBraco   Float?   @map("circ_antebraco_dir")
   circAntebracoEsq        Float?   @map("circ_antebraco_esq")
 
-  // Circunferências bilaterais — Coxa
+  // CircunferÃªncias bilaterais â€” Coxa
   circCoxaProximalDir     Float?   @map("circ_coxa_proximal_dir")
   circCoxaProximalEsq     Float?   @map("circ_coxa_proximal_esq")
   circCoxaMedialDir       Float?   @map("circ_coxa_medial_dir")
@@ -330,7 +332,7 @@ model AvaliacaoFisica {
   circCoxaDistalDir       Float?   @map("circ_coxa_distal_dir")
   circCoxaDistalEsq       Float?   @map("circ_coxa_distal_esq")
 
-  // Circunferências bilaterais — Panturrilha
+  // CircunferÃªncias bilaterais â€” Panturrilha
   circPanturrilhaDir      Float?   @map("circ_panturrilha_dir")
   circPanturrilhaEsq      Float?   @map("circ_panturrilha_esq")
 
@@ -345,17 +347,17 @@ model AvaliacaoFisica {
 }
 
 // ---------------------------------------------------------------------------
-// Base de alimentos (global — sem tenant)
+// Base de alimentos (global â€” sem tenant)
 // ---------------------------------------------------------------------------
 
 model BaseAlimento {
   id                Int     @id @default(autoincrement())
   nome              String
-  /// Marca comercial quando disponível (ex.: Open Food Facts).
+  /// Marca comercial quando disponÃ­vel (ex.: Open Food Facts).
   marca             String? @map("marca")
   codigoBarras      String? @unique @map("codigo_barras")
   fdcId             Int?    @unique @map("fdc_id")
-  /// Código alfanumérico da TBCA (ex.: C0113T), quando a linha veio dessa base
+  /// CÃ³digo alfanumÃ©rico da TBCA (ex.: C0113T), quando a linha veio dessa base
   codigoTbca        String? @unique @map("codigo_tbca")
   classeTbca        String? @map("classe_tbca")
   fonte             String?
@@ -370,12 +372,17 @@ model BaseAlimento {
 
   itensDieta       ItemDieta[]
   itensConsumidos  ItemConsumido[]
-
+  nomeExibicao  String? @map("nome_exibicao")
+  nomeBusca     String? @map("nome_busca")
   @@map("base_alimentos")
+  medidasCaseiras  MedidaCaseira[]
+    substitutos SubstitutoItem[]
+    @@index([nomeBusca])
+
 }
 
 // ---------------------------------------------------------------------------
-// Planos alimentares e refeições
+// Planos alimentares e refeiÃ§Ãµes
 // ---------------------------------------------------------------------------
 
 model PlanoAlimentar {
@@ -395,6 +402,8 @@ model PlanoAlimentar {
   refeicoesPlanejadas RefeicaoPlanejada[]
 
   @@map("planos_alimentares")
+  calculoEnergetico CalculoEnergetico?
+
 }
 
 model RefeicaoPlanejada {
@@ -415,17 +424,21 @@ model ItemDieta {
   idAlimento           Int      @map("id_alimento")
   quantidadeGramas     Float?   @map("quantidade_gramas")
   medidaCaseira        String?  @map("medida_caseira")
+  idMedidaCaseira      String?  @map("id_medida_caseira")
+  quantidadeMedida     Float?   @map("quantidade_medida")
   aVontade             Boolean  @default(false) @map("a_vontade")
   idGrupoSubstituicao  Int?     @map("id_grupo_substituicao")
 
   refeicaoPlanejada RefeicaoPlanejada @relation(fields: [idRefeicaoPlanejada], references: [id], onDelete: Cascade)
   alimento          BaseAlimento      @relation(fields: [idAlimento], references: [id], onDelete: Restrict)
+  medidaRef         MedidaCaseira?    @relation(fields: [idMedidaCaseira], references: [id], onDelete: SetNull)
 
   @@map("itens_dieta")
-}
+    substitutos SubstitutoItem[]
 
+}
 // ---------------------------------------------------------------------------
-// Registros diários e itens consumidos
+// Registros diÃ¡rios e itens consumidos
 // ---------------------------------------------------------------------------
 
 model RegistroDiario {
@@ -448,6 +461,7 @@ model ItemConsumido {
   id                 Int        @id @default(autoincrement())
   idRegistro         Int        @map("id_registro")
   idAlimento         Int        @map("id_alimento")
+  /// SEMPRE em gramas. ConversÃ£o de medida caseira â†’ gramas acontece no frontend.
   quantidadeConsumida Float?    @map("quantidade_consumida")
   origem             OrigemDado?
 
@@ -458,7 +472,7 @@ model ItemConsumido {
 }
 
 // ---------------------------------------------------------------------------
-// Formulários (modelos por workspace)
+// FormulÃ¡rios (modelos por workspace)
 // ---------------------------------------------------------------------------
 
 model ModeloFormulario {
@@ -481,7 +495,7 @@ model Pergunta {
   textoPergunta String? @map("texto_pergunta")
   tipoResposta  String? @map("tipo_resposta")
   tagAnalise    String? @map("tag_analise")
-  /// Opções para múltipla escolha (JSON array de strings), ex.: ["Sim","Não","Talvez"]
+  /// OpÃ§Ãµes para mÃºltipla escolha (JSON array de strings), ex.: ["Sim","NÃ£o","Talvez"]
   opcoesJson    Json?   @map("opcoes_json")
   obrigatoria   Boolean @default(false) @map("obrigatoria")
 
@@ -519,7 +533,7 @@ model Resposta {
 }
 
 // ---------------------------------------------------------------------------
-// Análises IA
+// AnÃ¡lises IA
 // ---------------------------------------------------------------------------
 
 model AnaliseIa {
@@ -595,4 +609,84 @@ model LancamentoFinanceiro {
   @@index([workspaceId, competencia])
   @@index([idResponsavel])
   @@map("lancamentos_financeiros")
+}
+model MedidaCaseira {
+  id            String        @id @default(cuid())
+  alimentoId    Int
+  alimento      BaseAlimento  @relation(fields: [alimentoId], references: [id], onDelete: Cascade)
+
+  /// Nome exibido no dropdown: "Colher(es) de sopa cheia", "Unidade", "FilÃ© mÃ©dio"
+  nome          String
+  /// Gramas correspondentes a 1 unidade desta medida
+  gramas        Decimal       @db.Decimal(8, 2)
+  /// Ordem de exibiÃ§Ã£o no dropdown (menor = primeiro)
+  ordem         Int           @default(0)
+  /// true = medida padrÃ£o prÃ©-selecionada ao escolher o alimento
+  padrao        Boolean       @default(false)
+
+  createdAt     DateTime      @default(now())
+  itensDieta    ItemDieta[]
+
+  @@unique([alimentoId, nome])
+  @@index([alimentoId])
+  @@map("MedidaCaseira")
+}
+model SubstitutoItem {
+  id               Int     @id @default(autoincrement())
+  idItemDieta      Int
+  idAlimento       Int
+  quantidadeGramas Float?
+  medidaCaseira    String?
+  idMedidaCaseira  String?
+  quantidadeMedida Float?
+  aVontade         Boolean @default(false)
+  ordem            Int     @default(0)
+  criadoEm         DateTime @default(now()) @map("criado_em")
+
+  itemDieta ItemDieta    @relation(fields: [idItemDieta], references: [id], onDelete: Cascade)
+  alimento  BaseAlimento @relation(fields: [idAlimento],  references: [id], onDelete: Restrict)
+
+  @@index([idItemDieta])
+  @@map("substitutos_itens")
+}
+
+model CalculoEnergetico {
+  id               Int  @id @default(autoincrement())
+  idPaciente       Int
+  idPlanoAlimentar Int? @unique
+
+  pesoKg       Float
+  alturaCm     Float
+  idadeAnos    Int
+  sexo         String
+  massaMagraKg Float?
+
+  formula        String
+  fatorAtividade Float  @default(1.55)
+  fatorInjuria   Float  @default(1)
+  eerNivel       String?
+
+  adicionalMet      Float?
+  adicionalVenta    Float?
+  adicionalGestante Float? @map("adicional_gestante")
+
+  tmbKcal Float
+  getKcal Float
+
+  metodoDistribuicao String?
+  proteinasGKg       Float?
+  lipidiosGKg        Float?
+  carboidratosGKg    Float?
+  proteinasPct       Float?
+  lipidiosPct        Float?
+  carboidratosPct    Float?
+
+  criadoEm     DateTime @default(now()) @map("criado_em")
+  atualizadoEm DateTime @updatedAt @map("atualizado_em")
+
+  paciente Paciente        @relation(fields: [idPaciente], references: [id], onDelete: Cascade)
+  plano    PlanoAlimentar? @relation(fields: [idPlanoAlimentar], references: [id], onDelete: SetNull)
+
+  @@index([idPaciente])
+  @@map("calculos_energeticos")
 }
