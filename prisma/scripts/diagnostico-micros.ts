@@ -14,8 +14,23 @@
 
 import 'dotenv/config';
 import { PrismaClient } from '@prisma/client';
+import { PrismaPg } from '@prisma/adapter-pg';
 
-const prisma = new PrismaClient();
+/**
+ * Prisma 7 exige opções explícitas (driver adapter). Mesma construção do
+ * src/prisma/prisma.service.ts do projeto — fonte única da URL do banco.
+ */
+function getDatasourceUrl(): string {
+  if (process.env.DATABASE_URL) return process.env.DATABASE_URL;
+  const host = process.env.DB_HOST ?? 'localhost';
+  const port = process.env.DB_PORT ?? '5432';
+  const user = process.env.DB_USER ?? 'postgres';
+  const password = encodeURIComponent(process.env.DB_PASSWORD ?? '');
+  const name = process.env.DB_NAME ?? 'nutriflow';
+  return `postgresql://${user}:${password}@${host}:${port}/${name}?schema=public`;
+}
+
+const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: getDatasourceUrl() }) });
 
 /** Os 23 campos de micro que o painel lê (mesmos nomes do schema). */
 const MICRO = [

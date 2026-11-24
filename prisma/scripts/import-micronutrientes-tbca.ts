@@ -2,12 +2,12 @@
  * Importador de micronutrientes da TBCA para `base_alimentos`.
  *
  * Uso:
- *   npx tsx prisma/import-micronutrientes-tbca.ts
- *   npx tsx prisma/import-micronutrientes-tbca.ts --dry-run
+ *   npx tsx prisma/scripts/import-micronutrientes-tbca.ts
+ *   npx tsx prisma/scripts/import-micronutrientes-tbca.ts --dry-run
  *
  * Pré-requisito: a migração 20261124000000_add_micronutrientes já aplicada.
  *
- * ─── DEFEITOS CONHECIDOS DO DUMP (tratados aqui) ────────────────────────────
+ * ─── DEFEITOS CONHECIDOS DO DUMP (tratados aqui) ──────────────────────────
  *
  * 1. VALORES AUSENTES VÊM COMO "-"
  *    Além de "NA", "ND" e "tr", o dump usa "-" para ausência de dado (não zero).
@@ -19,7 +19,16 @@
  *    é "g" e o valor é > 5, o valor é interpretado como mg. Os zeros ficam zero.
  *    Ver o relatório rodando com --dry-run.
  *
- * ─── LIMITES DA FONTE (não são bugs) ───────────────────────────────────────
+ * 3. TETO DE SANIDADE
+ *    Valores fisicamente impossíveis (ferro 907 mg/100 g) são anulados. Tetos
+ *    calibrados sobre a distribuição real do dump + máximos de literatura.
+ *
+ * 4. SOMA DOS ÁCIDOS GRAXOS
+ *    Cada ácido pode caber no total de lipídios e a soma estourar (ex.:
+ *    "Azeite, oliva, assado" com 60 g de poliinsaturados). Nesse caso os
+ *    quatro ácidos são anulados juntos.
+ *
+ * ─── LIMITES DA FONTE (não são bugs) ──────────────────────────────────────
  * - Vitamina K, B5, biotina, manganês, cromo e iodo não existem no dump.
  * - Niacina é mg total (a DRI usa mg NE); folato é equivalente de folato
  *   (a DRI usa mcg DFE). São aproximações, sinalizadas na UI.
@@ -30,8 +39,23 @@ import * as fs from 'node:fs';
 import * as readline from 'node:readline';
 import * as path from 'node:path';
 import { PrismaClient } from '@prisma/client';
+import { PrismaPg } from '@prisma/adapter-pg';
 
-const prisma = new PrismaClient();
+/**
+ * Prisma 7 exige opções explícitas (driver adapter). Mesma construção do
+ * src/prisma/prisma.service.ts do projeto — fonte única da URL do banco.
+ */
+function getDatasourceUrl(): string {
+  if (process.env.DATABASE_URL) return process.env.DATABASE_URL;
+  const host = process.env.DB_HOST ?? 'localhost';
+  const port = process.env.DB_PORT ?? '5432';
+  const user = process.env.DB_USER ?? 'postgres';
+  const password = encodeURIComponent(process.env.DB_PASSWORD ?? '');
+  const name = process.env.DB_NAME ?? 'nutriflow';
+  return `postgresql://${user}:${password}@${host}:${port}/${name}?schema=public`;
+}
+
+const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: getDatasourceUrl() }) });
 
 /** Componente da TBCA -> coluna do banco. Precisa espelhar o schema. */
 const MAPA: Record<string, string> = {
@@ -107,18 +131,18 @@ const LIMITES: Record<string, number> = {
   zinco: 100,               // ostras ~60
   cobre: 30,                // fígado ~15
   selenio: 3000,            // castanha-do-pará varia com o solo, até ~2000
-  vitaminaARae: 100000,        // óleo de fígado de bacalhau ~30000
+  vitaminaARae: 100000,     // óleo de fígado de bacalhau ~30000
   vitaminaC: 5000,          // camu-camu ~2000
   vitaminaD: 1000,          // óleo de fígado de peixe ~250
   vitaminaE: 500,
   tiamina: 50,              // levedura de cerveja ~12
-  vitaminaB2: 50,          // levedura ~10
+  vitaminaB2: 50,           // levedura ~10
   vitaminaB3: 100,
   vitaminaB6: 20,           // máximo real ~3
   vitaminaB12: 200,         // fígado ~70
   folato: 5000,             // levedura ~2000
   gorduraSaturada: 100,
-  gorduraMonoinsaturada: 100,   // nenhum alimento passa de ~100 (óleo puro)
+  gorduraMonoinsaturada: 100, // nenhum alimento passa de ~100 (óleo puro)
   gorduraPoliinsaturada: 100,
   gorduraTrans: 50,
   colesterol: 5000,         // gema desidratada ~2000
@@ -200,10 +224,7 @@ function extrairMicros(
     // caso do "Azeite, oliva, assado" com 60 g de poliinsaturados (azeite real
     // tem ~10%), que passou pela checagem por campo. Quando a soma estoura,
     // o conjunto está errado: anula os quatro.
-    const soma = CAMPOS_ACIDOS.reduce(
-      (s, c) => s + (dados[c] ?? 0),
-      0,
-    );
+    const soma = CAMPOS_ACIDOS.reduce((s, c) => s + (dados[c] ?? 0), 0);
     if (soma > lipidios * 1.15 + 0.2) {
       for (const campo of CAMPOS_ACIDOS) {
         if (dados[campo] === null) continue;
@@ -211,9 +232,7 @@ function extrairMicros(
           codigo: row.codigo,
           campo,
           valor: dados[campo] as number,
-          motivo: `soma dos ácidos graxos (${soma.toFixed(
-            1,
-          )} g) excede lipídios (${lipidios} g)`,
+          motivo: `soma dos ácidos graxos (${soma.toFixed(1)} g) excede lipídios (${lipidios} g)`,
         });
         dados[campo] = null;
       }
@@ -229,10 +248,16 @@ async function main() {
   // O JSONL fica em prisma/data/. Este script pode ter sido copiado para
   // prisma/ (junto do seed) ou para prisma/scripts/ — procura nos dois e
   // também permite apontar o arquivo por variável de ambiente.
+  // __dirname não existe em ESM; derive do caminho do argv[1] nesse caso.
+  const aqui: string =
+    typeof __dirname !== 'undefined'
+      ? __dirname
+      : path.dirname(process.argv[1] ?? process.cwd());
+
   const candidatos = [
     process.env.TBCA_JSONL,
-    path.join(__dirname, 'data', 'alimentos-tbca.jsonl'),          // prisma/
-    path.join(__dirname, '..', 'data', 'alimentos-tbca.jsonl'),     // prisma/scripts/
+    path.join(aqui, 'data', 'alimentos-tbca.jsonl'),          // prisma/
+    path.join(aqui, '..', 'data', 'alimentos-tbca.jsonl'),     // prisma/scripts/
     path.join(process.cwd(), 'prisma', 'data', 'alimentos-tbca.jsonl'),
   ].filter((x): x is string => !!x);
 
