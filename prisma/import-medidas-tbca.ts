@@ -14,6 +14,8 @@ import { PrismaPg } from '@prisma/adapter-pg';
  * - Medida padrão: a primeira da lista da TBCA (ordem original do site).
  * - Nomes normalizados no padrão do dropdown: "Colher de sopa cheia",
  *   "Escumadeira rasa", "Unidade/Fatia (média)" etc.
+ * - Códigos: a base de medidas usa códigos de exibição (BRC0195C) e o banco
+ *   usa os internos da TBCA (C0195C) — o importador remove o prefixo "BR".
  *
  * Uso: npx tsx prisma/import-medidas-tbca.ts
  * (lê prisma/data/medidas-tbca*.json — arquivo único ou partes — ver docs/FRENTES-2-3.md)
@@ -85,7 +87,10 @@ async function main() {
   let semAlimento = 0;
   let semMedidas = 0;
 
-  for (const codigo of codigos) {
+  for (const codigoBruto of codigos) {
+    // A base de medidas caseiras usa códigos de exibição (BRC0195C) e o banco
+    // usa os internos (C0195C) — mesma tabela, prefixo diferente.
+    const codigo = codigoBruto.startsWith('BR') ? codigoBruto.slice(2) : codigoBruto;
     const alimento = await prisma.baseAlimento.findFirst({
       where: { codigoTbca: codigo },
       select: { id: true },
@@ -94,7 +99,7 @@ async function main() {
       semAlimento++;
       continue;
     }
-    const medidas = dados[codigo];
+    const medidas = dados[codigoBruto];
     if (!medidas || medidas.length === 0) {
       semMedidas++;
       continue;
