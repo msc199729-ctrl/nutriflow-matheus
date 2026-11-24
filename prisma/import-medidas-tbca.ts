@@ -16,14 +16,12 @@ import { PrismaPg } from '@prisma/adapter-pg';
  *   "Escumadeira rasa", "Unidade/Fatia (média)" etc.
  *
  * Uso: npx tsx prisma/import-medidas-tbca.ts
- * (espera prisma/data/medidas-tbca.json — ver docs/FRENTES-2-3.md)
+ * (lê prisma/data/medidas-tbca.json ou medidas-tbca-part1/2/3.json — ver docs/FRENTES-2-3.md)
  */
 
 type MedidaScrape = { nome: string; gramas: number };
 
 type DadosMedidas = Record<string, MedidaScrape[]>;
-
-const BATCH = 50;
 
 function getConnectionString(): string {
   const url = process.env.DATABASE_URL;
@@ -50,22 +48,36 @@ function normalizarNome(raw: string): string {
 }
 
 async function main() {
-  const filePath = process.argv[2] ?? 'prisma/data/medidas-tbca.json';
-  if (!fs.existsSync(filePath)) {
-    console.error('Arquivo não encontrado:', filePath);
+  // aceita 1 arquivo OU o padrão em partes (medidas-tbca-part1/2/3.json)
+  const argPath = process.argv[2];
+  const filePaths: string[] = [];
+  if (argPath) {
+    filePaths.push(argPath);
+  } else {
+    for (const suffix of ['', '-part1', '-part2', '-part3']) {
+      const p = `prisma/data/medidas-tbca${suffix}.json`;
+      if (fs.existsSync(p)) filePaths.push(p);
+    }
+  }
+  if (filePaths.length === 0) {
+    console.error('Nenhum arquivo de medidas encontrado em prisma/data/');
     console.error(
       'Gere o scrape primeiro (ver docs/FRENTES-2-3.md). Ou passe o caminho: npx tsx prisma/import-medidas-tbca.ts <caminho>',
     );
     process.exit(1);
   }
 
-  const dados = JSON.parse(fs.readFileSync(filePath, 'utf8')) as DadosMedidas;
+  const dados: DadosMedidas = {};
+  for (const filePath of filePaths) {
+    const parte = JSON.parse(fs.readFileSync(filePath, 'utf8')) as DadosMedidas;
+    Object.assign(dados, parte);
+  }
 
   const adapter = new PrismaPg({ connectionString: getConnectionString() });
   const prisma = new PrismaClient({ adapter });
 
   const codigos = Object.keys(dados);
-  console.log(`Arquivo: ${codigos.length} alimentos com medidas.`);
+  console.log(`Arquivo(s): ${codigos.length} alimentos com medidas.`);
 
   let processados = 0;
   let criadas = 0;
