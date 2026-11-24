@@ -1,0 +1,66 @@
+// ============================================================================
+// SUBSTITUIR o model BaseAlimento inteiro em prisma/schema.prisma
+//
+// As 23 colunas novas ficam no fim, com os mesmos nomes de campo que o
+// importador e o serviço de nutrientes usam (camelCase).
+// As colunas no banco ficam em snake_case via @map.
+// ============================================================================
+
+model BaseAlimento {
+  id                Int     @id @default(autoincrement())
+  nome              String
+  /// Marca comercial quando disponível (ex.: Open Food Facts).
+  marca             String? @map("marca")
+  codigoBarras      String? @unique @map("codigo_barras")
+  fdcId             Int?    @unique @map("fdc_id")
+  /// Código alfanumérico da TBCA (ex.: C0113T), quando a linha veio dessa base
+  codigoTbca        String? @unique @map("codigo_tbca")
+  classeTbca        String? @map("classe_tbca")
+  fonte             String?
+  calorias          Float?
+  proteinas         Float?
+  carboidratos      Float?
+  gorduras          Float?
+  fibras            Float?
+  sodio             Float?
+  ehUltraprocessado Boolean @default(false) @map("eh_ultraprocessado")
+  scoreNova         Int?    @map("score_nova")
+
+  // ── Micronutrientes (valores por 100 g da parte comestível) ─────────────
+  // Fonte: TBCA. Ausência de dado = null (nunca 0).
+  // A TBCA não traz: vitamina K, B5, biotina, manganês, cromo, iodo.
+
+  // Minerais
+  calcio            Float?
+  ferro             Float?
+  magnesio          Float?
+  fosforo           Float?
+  potassio          Float?
+  zinco             Float?
+  cobre             Float?  @map("cobre")
+  selenio           Float?  @map("selenio")          // mcg
+
+  // Vitaminas
+  vitaminaA         Float?  @map("vitamina_a")       // mcg RAE
+  vitaminaC         Float?  @map("vitamina_c")       // mg
+  vitaminaD         Float?  @map("vitamina_d")       // mcg
+  vitaminaE         Float?  @map("vitamina_e")       // mg (alfa-tocoferol)
+  tiamina           Float?  @map("tiamina")          // mg (B1)
+  riboflavina       Float?  @map("riboflavina")      // mg (B2)
+  niacina           Float?  @map("niacina")          // mg (B3)
+  vitaminaB6        Float?  @map("vitamina_b6")      // mg
+  vitaminaB12       Float?  @map("vitamina_b12")     // mcg
+  folato            Float?  @map("folato")           // mcg
+
+  // Gorduras
+  agSaturados       Float?  @map("ag_saturados")       // g
+  agMonoinsaturados Float?  @map("ag_monoinsaturados") // g
+  agPoliinsaturados Float?  @map("ag_poliinsaturados") // g
+  agTrans           Float?  @map("ag_trans")           // g
+  colesterol        Float?  @map("colesterol")         // mg
+
+  itensDieta       ItemDieta[]
+  itensConsumidos  ItemConsumido[]
+
+  @@map("base_alimentos")
+}

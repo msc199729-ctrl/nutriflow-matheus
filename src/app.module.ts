@@ -26,10 +26,12 @@ import { MetasModule } from './metas/metas.module';
 import { AnaliseModule } from './analise/analise.module';
 import { DocumentosModule } from './documentos/documentos.module';
 import { CalculoEnergeticoModule } from './calculo-energetico/calculo-energetico.module';
+import { NutrientesModule } from './micronutrientes/nutrientes.module';
 
 
 @Module({
   imports: [
+    NutrientesModule,
     ConfigModule.forRoot({ isGlobal: true }),
     ScheduleModule.forRoot(),
     ThrottlerModule.forRoot([

@@ -1,0 +1,208 @@
+// ============================================================================
+// LIMPEZA DE NOME PARA EXIBIÇÃO
+// ============================================================================
+export function limparNomeAlimento(nomeOriginal: string): string {
+  let nome = nomeOriginal.trim();
+  nome = nome.replace(
+    /,?\s*[A-Z][a-z]+ [a-z]+(\s+(var|subsp|ssp)\.\s+[a-z]+)?\.?\s*$/i,
+    '',
+  );
+  const partes = nome.split(',').map((p) => p.trim()).filter(Boolean);
+  if (partes.length <= 1) return partes[0] || nomeOriginal;
+  const [principal, ...complementos] = partes;
+  const qualificadores: string[] = [];
+  const preparacoes: string[] = [];
+  for (const c of complementos) {
+    const lower = c.toLowerCase();
+    if (
+      lower.startsWith('in natura') ||
+      lower.startsWith('cru') ||
+      lower.startsWith('cozid') ||
+      lower.startsWith('assad') ||
+      lower.startsWith('frit') ||
+      lower.startsWith('grelhad') ||
+      lower.startsWith('refogad') ||
+      lower.startsWith('desidratad') ||
+      lower.startsWith('seco') ||
+      lower.startsWith('enlatad') ||
+      lower.startsWith('congelad') ||
+      lower.startsWith('em conserva') ||
+      lower.startsWith('em calda') ||
+      lower.startsWith('torrad') ||
+      lower.startsWith('com sal') ||
+      lower.startsWith('sem sal') ||
+      lower.startsWith('sem pele') ||
+      lower.startsWith('com pele') ||
+      lower.startsWith('integral') ||
+      lower.startsWith('light') ||
+      lower.startsWith('diet')
+    ) {
+      preparacoes.push(c.toLowerCase());
+    } else {
+      qualificadores.push(c.toLowerCase());
+    }
+  }
+  const parteQualif = qualificadores.length ? `${qualificadores.join(' ')} de ` : '';
+  const partePrep = preparacoes.length ? ` ${preparacoes.join(', ')}` : '';
+  const resultado = `${parteQualif}${principal.toLowerCase()}${partePrep}`;
+  return resultado.charAt(0).toUpperCase() + resultado.slice(1);
+}
+
+// ============================================================================
+// NORMALIZAÇÃO COMPLETA (barcode / novos alimentos)
+// ============================================================================
+
+const CIENTIFICOS = new Set([
+  'gallus', 'gallus gallus', 'bos', 'bos taurus', 'sus', 'sus scrofa',
+  'zea', 'zea mays', 'zea may', 'oryza', 'oryza sativa', 'lablab',
+  'lablab purpureus', 'glycine', 'glycine max', 'phaseolus', 'brassica',
+  'solanum', 'malus', 'musa', 'citrus', 'lactuca', 'daucus', 'allium',
+  'capsicum', 'cucumis', 'cucurbita', 'ipomoea', 'manihot', 'saccharum',
+  'coffea', 'theobroma', 'psidium', 'carica', 'passiflora', 'mangifera',
+  'vitis', 'prunus', 'pyrus', 'fragaria', 'rubus', 'avena', 'triticum',
+  'hordeum', 'secale', 'pennisetum', 'sorghum', 'cichla', 'oreochromis',
+  'salmo', 'ocellaris', 'purpureus', 'sativa', 'sativum', 'domesticus',
+  'taurus', 'scrofa', 'mays', 'may', 'spp', 'l', 'sweet', 'linn',
+  'var', 'subsp', 'ssp', 'vulgaris', 'aestivum', 'durum', 'bicolor',
+  'europaea', 'communis', 'officinalis', 'sativus', 'esculentum',
+  'maximum', 'minimum',
+  'olea', 'beta', 'raphanus', 'linum', 'arachis', 'anacardium',
+  'bertholletia', 'corylus', 'juglans', 'sesamum', 'helianthus',
+  'spinacia', 'sechium', 'pisum', 'cicer', 'lens', 'vigna',
+  'abelmoschus', 'colocasia', 'dioscorea', 'xanthosoma', 'ananas',
+  'persea', 'annona', 'eugenia', 'syzygium', 'averrhoa', 'spondias',
+  'tamarindus', 'litchi', 'nephelium', 'dimocarpus', 'artocarpus',
+  'morus', 'ficus', 'cinnamomum', 'piper', 'zingiber', 'curcuma',
+  'mentha', 'ocimum', 'origanum', 'thymus', 'rosmarinus', 'laurus',
+  'petroselinum', 'coriandrum', 'foeniculum', 'anethum', 'salvia',
+  'melissa', 'lavandula', 'matricaria', 'camellia', 'ilex',
+  'paullinia', 'bactris', 'euterpe', 'mauritia', 'astrocaryum',
+  'attalea', 'orbignya', 'acromia', 'pouteria', 'chrysophyllum',
+  'manilkara', 'garcinia', 'plinia', 'myrciaria', 'campomanesia',
+  'cereus', 'hylocereus', 'selenicereus',
+  'opuntia', 'nopalea', 'physalis',
+]);
+
+const EPITETOS = new Set([
+  'anguria', 'acuminata', 'aurantifolia', 'balbisiana', 'bicolor',
+  'communis', 'durum', 'esculentum', 'europaea', 'gilo', 'hypogaea',
+  'limonia', 'limoniai', 'maximum', 'melongena', 'minimum', 'officinalis',
+  'reticulata', 'sativa', 'sativum', 'sessiliflorum', 'sinensis',
+  'tuberosum', 'usitatissimum', 'vulgaris', 'aestivum', 'ocellaris',
+  'mays', 'may', 'gallus', 'taurus', 'scrofa', 'domestica', 'domesticus',
+  'purpureus', 'nigra', 'alba', 'rubra', 'sylvestris', 'graveolens',
+  'dulcis', 'indica', 'japonica', 'chinensis', 'lanceolata', 'odorata',
+]);
+
+const AUTORES_TBCA =
+  /\s+(?:L|linn|osbeck|colla|swing|blanco|willd|mill|kunth|benth|hook|dc|hbk|lam|roem|schult)\.?\s*$/i;
+
+const SUFIXO_TAXO = /\s+(?:sp|spp|ssp|subsp|var)\.?\s*$/i;
+
+const CORRECOES_ORTOGRAFICAS: Array<[RegExp, string]> = [
+  [/\bfeji[aã]o\b/gi, 'feijão'],
+  [/\bdreanda\b/gi, 'drenada'],
+  [/\bbeterr+aba\b/gi, 'beterraba'],
+  [/\b[oó]loe\b/gi, 'óleo'],
+  [/\ba milanesa\b/gi, 'à milanesa'],
+];
+
+export function temResiduoLatino(texto: string | null | undefined): boolean {
+  const t = (texto ?? '').trim();
+  if (!t) return false;
+  if (AUTORES_TBCA.test(t) || SUFIXO_TAXO.test(t)) return true;
+  return t.split(/\s+/).some((tk) => {
+    const limpo = tk.toLowerCase().replace(/[.,;:´'"`]/g, '');
+    return CIENTIFICOS.has(limpo) || EPITETOS.has(limpo);
+  });
+}
+
+function removerCientificos(texto: string): string {
+  const palavras = texto.split(' ');
+  const resultado: string[] = [];
+  let i = 0;
+  while (i < palavras.length) {
+    const atual = palavras[i].toLowerCase().replace(/\.$/, '');
+    const proxima = palavras[i + 1]?.toLowerCase().replace(/\.$/, '');
+    if (proxima && CIENTIFICOS.has(atual) && CIENTIFICOS.has(proxima)) {
+      i += 2;
+      continue;
+    }
+    if (CIENTIFICOS.has(atual)) {
+      i += 1;
+      continue;
+    }
+    resultado.push(palavras[i]);
+    i += 1;
+  }
+  return resultado.join(' ');
+}
+
+function removerBinomioFinal(texto: string): string {
+  let s = texto.trim();
+  let antes = '';
+
+  while (s !== antes) {
+    antes = s;
+    s = s
+      .replace(/[,\s]+$/, '')
+      .replace(AUTORES_TBCA, '')
+      .replace(SUFIXO_TAXO, '')
+      .replace(/\s+x\s*$/i, '')
+      .trim();
+  }
+
+  while (s !== antes) {
+    antes = s;
+    s = s
+      .replace(
+        /\s+([A-ZÀ-Ý][a-zà-ÿ]{2,})\s+([A-Za-zÀ-ÿ]{2,})\s*$/,
+        (m, g1: string, g2: string) =>
+          CIENTIFICOS.has(g1.toLowerCase()) || EPITETOS.has(g2.toLowerCase())
+            ? ''
+            : m,
+      )
+      .replace(
+        /\s+([A-ZÀ-Ý][a-zà-ÿ]{2,})\s*$/,
+        (m, g1: string) => (CIENTIFICOS.has(g1.toLowerCase()) ? '' : m),
+      )
+      .replace(
+        /\s+([a-zà-ÿ]{4,})\s*$/,
+        (m, g1: string) => (EPITETOS.has(g1.toLowerCase()) ? '' : m),
+      )
+      .trim();
+  }
+
+  return s;
+}
+
+export function limparNomeCompleto(nome: string): {
+  exibicao: string;
+  busca: string;
+} {
+  let s = nome ?? '';
+  let antes = '';
+
+  do {
+    antes = s;
+    s = s.replace(/\([^()]*\)/g, ' ').replace(/\[[^\]]*\]/g, ' ');
+  } while (s !== antes);
+
+  s = s.replace(/\(.*$/, ' ');
+  s = s.replace(/\bc\//gi, 'com ');
+  s = s.replace(/\bs\//gi, 'sem ');
+  s = s.replace(/[,/;()]+/g, ' ');
+  s = s.replace(/\s+/g, ' ').trim();
+
+  s = removerCientificos(s);
+  s = removerBinomioFinal(s);
+
+  for (const [re, sub] of CORRECOES_ORTOGRAFICAS) s = s.replace(re, sub);
+
+  s = s.replace(/\s+/g, ' ').replace(/[,;:\-\s]+$/, '').trim();
+  s = s.replace(/\s+(com|sem|e|de|da|do)$/i, '').trim();
+
+  const exibicao = s.charAt(0).toUpperCase() + s.slice(1);
+  const busca = normalizeSearchText(exibicao);
+  return { exibicao, busca };
+}

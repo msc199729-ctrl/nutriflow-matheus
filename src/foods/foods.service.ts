@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import type { BaseAlimento } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import type { BarcodeProductProvider } from './barcode-product.types';
@@ -274,23 +274,17 @@ function hasIncompatibleToken(nomeBusca: string, query: string): boolean {
 // ============================================================================
 // LIMPEZA DE NOME PARA EXIBIÇÃO
 // ============================================================================
-
 export function limparNomeAlimento(nomeOriginal: string): string {
   let nome = nomeOriginal.trim();
-
   nome = nome.replace(
     /,?\s*[A-Z][a-z]+ [a-z]+(\s+(var|subsp|ssp)\.\s+[a-z]+)?\.?\s*$/i,
     '',
   );
-
   const partes = nome.split(',').map((p) => p.trim()).filter(Boolean);
-
   if (partes.length <= 1) return partes[0] || nomeOriginal;
-
   const [principal, ...complementos] = partes;
   const qualificadores: string[] = [];
   const preparacoes: string[] = [];
-
   for (const c of complementos) {
     const lower = c.toLowerCase();
     if (
@@ -321,10 +315,8 @@ export function limparNomeAlimento(nomeOriginal: string): string {
       qualificadores.push(c.toLowerCase());
     }
   }
-
   const parteQualif = qualificadores.length ? `${qualificadores.join(' ')} de ` : '';
   const partePrep = preparacoes.length ? ` ${preparacoes.join(', ')}` : '';
-
   const resultado = `${parteQualif}${principal.toLowerCase()}${partePrep}`;
   return resultado.charAt(0).toUpperCase() + resultado.slice(1);
 }
@@ -347,17 +339,64 @@ const CIENTIFICOS = new Set([
   'var', 'subsp', 'ssp', 'vulgaris', 'aestivum', 'durum', 'bicolor',
   'europaea', 'communis', 'officinalis', 'sativus', 'esculentum',
   'maximum', 'minimum',
+  'olea', 'beta', 'raphanus', 'linum', 'arachis', 'anacardium',
+  'bertholletia', 'corylus', 'juglans', 'sesamum', 'helianthus',
+  'spinacia', 'sechium', 'pisum', 'cicer', 'lens', 'vigna',
+  'abelmoschus', 'colocasia', 'dioscorea', 'xanthosoma', 'ananas',
+  'persea', 'annona', 'eugenia', 'syzygium', 'averrhoa', 'spondias',
+  'tamarindus', 'litchi', 'nephelium', 'dimocarpus', 'artocarpus',
+  'morus', 'ficus', 'cinnamomum', 'piper', 'zingiber', 'curcuma',
+  'mentha', 'ocimum', 'origanum', 'thymus', 'rosmarinus', 'laurus',
+  'petroselinum', 'coriandrum', 'foeniculum', 'anethum', 'salvia',
+  'melissa', 'lavandula', 'matricaria', 'camellia', 'ilex',
+  'paullinia', 'bactris', 'euterpe', 'mauritia', 'astrocaryum',
+  'attalea', 'orbignya', 'acromia', 'pouteria', 'chrysophyllum',
+  'manilkara', 'garcinia', 'plinia', 'myrciaria', 'campomanesia',
+  'cereus', 'hylocereus', 'selenicereus',
+  'opuntia', 'nopalea', 'physalis',
 ]);
+
+const EPITETOS = new Set([
+  'anguria', 'acuminata', 'aurantifolia', 'balbisiana', 'bicolor',
+  'communis', 'durum', 'esculentum', 'europaea', 'gilo', 'hypogaea',
+  'limonia', 'limoniai', 'maximum', 'melongena', 'minimum', 'officinalis',
+  'reticulata', 'sativa', 'sativum', 'sessiliflorum', 'sinensis',
+  'tuberosum', 'usitatissimum', 'vulgaris', 'aestivum', 'ocellaris',
+  'mays', 'may', 'gallus', 'taurus', 'scrofa', 'domestica', 'domesticus',
+  'purpureus', 'nigra', 'alba', 'rubra', 'sylvestris', 'graveolens',
+  'dulcis', 'indica', 'japonica', 'chinensis', 'lanceolata', 'odorata',
+]);
+
+const AUTORES_TBCA =
+  /\s+(?:L|linn|osbeck|colla|swing|blanco|willd|mill|kunth|benth|hook|dc|hbk|lam|roem|schult)\.?\s*$/i;
+
+const SUFIXO_TAXO = /\s+(?:sp|spp|ssp|subsp|var)\.?\s*$/i;
+
+const CORRECOES_ORTOGRAFICAS: Array<[RegExp, string]> = [
+  [/\bfeji[aã]o\b/gi, 'feijão'],
+  [/\bdreanda\b/gi, 'drenada'],
+  [/\bbeterr+aba\b/gi, 'beterraba'],
+  [/\b[oó]loe\b/gi, 'óleo'],
+  [/\ba milanesa\b/gi, 'à milanesa'],
+];
+
+export function temResiduoLatino(texto: string | null | undefined): boolean {
+  const t = (texto ?? '').trim();
+  if (!t) return false;
+  if (AUTORES_TBCA.test(t) || SUFIXO_TAXO.test(t)) return true;
+  return t.split(/\s+/).some((tk) => {
+    const limpo = tk.toLowerCase().replace(/[.,;:´'"`]/g, '');
+    return CIENTIFICOS.has(limpo) || EPITETOS.has(limpo);
+  });
+}
 
 function removerCientificos(texto: string): string {
   const palavras = texto.split(' ');
   const resultado: string[] = [];
   let i = 0;
-
   while (i < palavras.length) {
     const atual = palavras[i].toLowerCase().replace(/\.$/, '');
     const proxima = palavras[i + 1]?.toLowerCase().replace(/\.$/, '');
-
     if (proxima && CIENTIFICOS.has(atual) && CIENTIFICOS.has(proxima)) {
       i += 2;
       continue;
@@ -372,30 +411,72 @@ function removerCientificos(texto: string): string {
   return resultado.join(' ');
 }
 
+function removerBinomioFinal(texto: string): string {
+  let s = texto.trim();
+  let antes = '';
+
+  while (s !== antes) {
+    antes = s;
+    s = s
+      .replace(/[,\s]+$/, '')
+      .replace(AUTORES_TBCA, '')
+      .replace(SUFIXO_TAXO, '')
+      .replace(/\s+x\s*$/i, '')
+      .trim();
+  }
+
+  while (s !== antes) {
+    antes = s;
+    s = s
+      .replace(
+        /\s+([A-ZÀ-Ý][a-zà-ÿ]{2,})\s+([A-Za-zÀ-ÿ]{2,})\s*$/,
+        (m, g1: string, g2: string) =>
+          CIENTIFICOS.has(g1.toLowerCase()) || EPITETOS.has(g2.toLowerCase())
+            ? ''
+            : m,
+      )
+      .replace(
+        /\s+([A-ZÀ-Ý][a-zà-ÿ]{2,})\s*$/,
+        (m, g1: string) => (CIENTIFICOS.has(g1.toLowerCase()) ? '' : m),
+      )
+      .replace(
+        /\s+([a-zà-ÿ]{4,})\s*$/,
+        (m, g1: string) => (EPITETOS.has(g1.toLowerCase()) ? '' : m),
+      )
+      .trim();
+  }
+
+  return s;
+}
+
 export function limparNomeCompleto(nome: string): {
   exibicao: string;
   busca: string;
 } {
-  let s = nome;
+  let s = nome ?? '';
+  let antes = '';
 
-  let antes;
   do {
     antes = s;
-    s = s.replace(/\([^()]*\)/g, ' ');
+    s = s.replace(/\([^()]*\)/g, ' ').replace(/\[[^\]]*\]/g, ' ');
   } while (s !== antes);
+
   s = s.replace(/\(.*$/, ' ');
-  s = s.replace(/\[[^\]]*\]/g, ' ');
   s = s.replace(/\bc\//gi, 'com ');
   s = s.replace(/\bs\//gi, 'sem ');
   s = s.replace(/[,/;()]+/g, ' ');
   s = s.replace(/\s+/g, ' ').trim();
+
   s = removerCientificos(s);
+  s = removerBinomioFinal(s);
+
+  for (const [re, sub] of CORRECOES_ORTOGRAFICAS) s = s.replace(re, sub);
+
   s = s.replace(/\s+/g, ' ').replace(/[,;:\-\s]+$/, '').trim();
   s = s.replace(/\s+(com|sem|e|de|da|do)$/i, '').trim();
 
   const exibicao = s.charAt(0).toUpperCase() + s.slice(1);
   const busca = normalizeSearchText(exibicao);
-
   return { exibicao, busca };
 }
 
@@ -455,14 +536,34 @@ export class FoodsService {
     const prepIntent = detectPrepIntent(term);
     const multiTerm = requestedTokens.length >= 2;
 
-const rows = await this.prisma.baseAlimento.findMany({
-  include: {
-    medidasCaseiras: {
-      orderBy: [{ padrao: 'desc' }, { ordem: 'asc' }],
+    // ---------- FASE 0: pré-filtro no banco ----------
+    // O findMany() sem where carregava a tabela inteira + medidas caseiras
+    // de todos os alimentos a cada tecla. Agora o Postgres devolve apenas um
+    // superconjunto candidato e o ranking roda em cima dele.
+    const medidasSelect = {
+      orderBy: [{ padrao: 'desc' as const }, { ordem: 'asc' as const }],
       select: { id: true, nome: true, gramas: true, padrao: true, ordem: true },
-    },
-  },
-});
+    };
+
+    const OR = requestedTokens.map((t) => ({
+      nomeBusca: { contains: t, mode: 'insensitive' as const },
+    }));
+
+    let rows = await this.prisma.baseAlimento.findMany({
+      where: OR.length ? { OR } : undefined,
+      take: Math.max(limit * 12, 200),
+      orderBy: { id: 'asc' },
+      include: { medidasCaseiras: medidasSelect },
+    });
+
+    // Fallback: linhas antigas sem nomeBusca preenchido não entram no OR.
+    if (rows.length === 0) {
+      rows = await this.prisma.baseAlimento.findMany({
+        take: 400,
+        orderBy: { id: 'asc' },
+        include: { medidasCaseiras: medidasSelect },
+      });
+    }
     // ---------- FASE 1: filtro mínimo ----------
     const base = rows.filter((row) => {
       const nomeBusca = row.nomeBusca ?? normalizeSearchText(row.nome);
@@ -554,6 +655,91 @@ const rows = await this.prisma.baseAlimento.findMany({
 
     return scored;
   }
+  /**
+   * Catálogo leve para busca instantânea no front.
+   * Retorna o necessário para montar a lista e o seletor de medida caseira.
+   * O front carrega uma vez e filtra localmente — zero requisição por tecla.
+   */
+  async catalogoBusca() {
+    const rows = await this.prisma.baseAlimento.findMany({
+      select: {
+        id: true,
+        nome: true,
+        nomeExibicao: true,
+        calorias: true,
+        proteinas: true,
+        carboidratos: true,
+        gorduras: true,
+        fibras: true,
+        sodio: true,
+        medidasCaseiras: {
+          orderBy: [{ padrao: 'desc' }, { ordem: 'asc' }],
+          select: {
+            id: true,
+            nome: true,
+            gramas: true,
+            padrao: true,
+            ordem: true,
+          },
+        },
+      },
+      orderBy: { nome: 'asc' },
+    });
+
+    return rows.map((r) => {
+      const limpo = limparNomeCompleto(r.nome);
+      const guardado = (r.nomeExibicao ?? '').trim();
+      const exibicao =
+        guardado && !temResiduoLatino(guardado) ? guardado : limpo.exibicao;
+      return {
+        ...r,
+        nomeExibicao: exibicao,
+        nomeBusca: normalizeSearchText(exibicao),
+        medidasCaseiras: r.medidasCaseiras.map((m) => ({
+          id: m.id,
+          nome: m.nome,
+          gramas: Number(m.gramas),
+          padrao: m.padrao,
+          ordem: m.ordem,
+        })),
+      };
+    });
+  }
+
+  /**
+   * Corrige o nome de exibição de um alimento e recalcula o índice de busca.
+   * É a via definitiva de curadoria: o nome é corrigido no sistema e persiste,
+   * sem depender de script de saneamento sobre a base inteira.
+   */
+  async renomearAlimento(id: number, nomeExibicao: string) {
+    const limpo = String(nomeExibicao ?? '').trim();
+    if (limpo.length < 2) {
+      throw new BadRequestException(
+        'O nome precisa ter ao menos 2 caracteres.',
+      );
+    }
+      /**
+   * Fila de curadoria priorizada pelo uso real.
+   * Conta em quantas refeições prescritas cada alimento aparece e devolve
+   * os mais frequentes — que são os que realmente importam corrigir.
+   */
+  
+
+    const existe = await this.prisma.baseAlimento.findUnique({
+      where: { id },
+      select: { id: true },
+    });
+    if (!existe) throw new NotFoundException('Alimento não encontrado.');
+
+    return this.prisma.baseAlimento.update({
+      where: { id },
+      data: {
+        nomeExibicao: limpo,
+        nomeBusca: normalizeSearchText(limpo),
+      },
+      select: { id: true, nomeExibicao: true, nomeBusca: true },
+    });
+  }
 
   async findByBarcodeStrict(
     sanitizedDigits: string,
@@ -634,5 +820,40 @@ const rows = await this.prisma.baseAlimento.findMany({
       if (e instanceof BarcodeUpstreamError) return null;
       throw e;
     }
+  }
+  async maisUsadosAlimentos(limite = 60) {
+    const teto = Math.min(Math.max(Number(limite) || 60, 1), 200);
+
+    const agrupado = await this.prisma.itemDieta.groupBy({
+      by: ['idAlimento'],
+      _count: { idAlimento: true },
+      orderBy: { _count: { idAlimento: 'desc' } },
+      take: teto,
+    });
+
+    if (agrupado.length === 0) return [];
+
+    const ids = agrupado.map((g) => g.idAlimento);
+    const usos = new Map(
+      agrupado.map((g) => [g.idAlimento, g._count.idAlimento]),
+    );
+
+    const alimentos = await this.prisma.baseAlimento.findMany({
+      where: { id: { in: ids } },
+      select: {
+        id: true,
+        nome: true,
+        nomeExibicao: true,
+        nomeBusca: true,
+        calorias: true,
+        carboidratos: true,
+        proteinas: true,
+        gorduras: true,
+      },
+    });
+
+    return alimentos
+      .map((a) => ({ ...a, usos: usos.get(a.id) ?? 0 }))
+      .sort((a, b) => b.usos - a.usos);
   }
 }
