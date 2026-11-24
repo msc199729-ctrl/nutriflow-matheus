@@ -16,7 +16,7 @@ import { PrismaPg } from '@prisma/adapter-pg';
  *   "Escumadeira rasa", "Unidade/Fatia (média)" etc.
  *
  * Uso: npx tsx prisma/import-medidas-tbca.ts
- * (lê prisma/data/medidas-tbca.json ou medidas-tbca-part1/2/3.json — ver docs/FRENTES-2-3.md)
+ * (lê prisma/data/medidas-tbca*.json — arquivo único ou partes — ver docs/FRENTES-2-3.md)
  */
 
 type MedidaScrape = { nome: string; gramas: number };
@@ -48,13 +48,13 @@ function normalizarNome(raw: string): string {
 }
 
 async function main() {
-  // aceita 1 arquivo OU o padrão em partes (medidas-tbca-part1/2/3.json)
+  // aceita 1 arquivo OU o padrão em partes (medidas-tbca-part1..6 / -p1..6)
   const argPath = process.argv[2];
   const filePaths: string[] = [];
   if (argPath) {
     filePaths.push(argPath);
   } else {
-    for (const suffix of ['', '-part1', '-part2', '-part3']) {
+    for (const suffix of ['', '-part1', '-part2', '-part3', '-part4', '-part5', '-part6', '-p1', '-p2', '-p3', '-p4', '-p5', '-p6']) {
       const p = `prisma/data/medidas-tbca${suffix}.json`;
       if (fs.existsSync(p)) filePaths.push(p);
     }
