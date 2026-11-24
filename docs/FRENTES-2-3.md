@@ -43,10 +43,15 @@ colher de sopa 11 mL, concha média 150 mL etc. — tbca.net.br).
   `codigo_tbca`, upsert pela constraint única (alimentoId, nome), primeira medida
   vira padrão do dropdown, nomes normalizados ("Colher sopa cheia" →
   "Colher de sopa cheia", "Pedaço/Unidade/Fatia (M)" → "Unidade/Fatia (média)")
-- `prisma/data/medidas-tbca.json` — o scrape completo (439 KB)
+- **`medidas-tbca.json`** — o scrape completo (439 KB). Por ser grande, NÃO está no
+  repo: é entregue como arquivo separado. Salvar em `prisma/data/medidas-tbca.json`.
+  O importador também aceita qualquer caminho como argumento:
+  `npx tsx prisma/import-medidas-tbca.ts <caminho>`.
 
 ## Como aplicar (no PC, na pasta do projeto)
 
+1. Salvar o arquivo `medidas-tbca.json` (entregue separadamente) em `prisma/data/`
+2. Rodar:
 ```
 npx tsx prisma/import-medidas-tbca.ts
 npx tsx prisma/import-off-br.ts
