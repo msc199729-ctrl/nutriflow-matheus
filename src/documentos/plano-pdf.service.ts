@@ -4,13 +4,15 @@
  * Rota (registrada no DocumentosController):
  *   GET /documentos/plano-alimentar/:idPlano/pdf   -> PDF inline
  *
- * Design: mesmo timbre do atestado/recibo (nome + especialidade + CRN no
- * topo, linha divisória), corpo em tabelas por refeição (zebra sutil) e
- * bloco de assinatura com CRN. Segue Res. CFN 599/2018 + 856/2026: sem
- * promessa de resultado; é a PRESCRIÇÃO, não material de divulgação.
+ * Design (v2): faixa de topo full-bleed azul-marinho com nome/CRN em branco,
+ * linha de acento teal, título do documento com chip de vigência, refeições
+ * com faixa de título (borda esquerda teal + horário à direita), tabela com
+ * zebra sutil, hidratação em destaque, bloco de assinatura e paginação.
+ * Segue Res. CFN 599/2018 + 856/2026: sem promessa de resultado; é a
+ * PRESCRIÇÃO, não material de divulgação.
  *
  * Logo: placeholder — quando o arquivo existir em assets/logo.png,
- * descomentar o bloco LOGO em gerar().
+ * descomentar o bloco LOGO em desenharTopo().
  */
 
 import { Injectable, NotFoundException } from '@nestjs/common';
@@ -20,15 +22,20 @@ import { PROFISSIONAL_PADRAO } from './documentos.config';
 import type { JwtPayloadUser } from '../common/decorators/current-user.decorator';
 import { PacientesService } from '../pacientes/pacientes.service';
 
-const MARGEM_ESQ = 56;
-const MARGEM_DIR = 56;
-const MARGEM_SUP = 64;
-const MARGEM_INF = 64;
 const LARGEMA4 = 595.28; // pt
+const ALTURA_A4 = 841.89; // pt
+const MARGEM_ESQ = 52;
+const MARGEM_DIR = 52;
+const MARGEM_SUP = 150; // abaixo da faixa de topo
+const MARGEM_INF = 64;
 const LARGEM_UTIL = LARGEMA4 - MARGEM_ESQ - MARGEM_DIR;
-const COR_PRIMARIA = '#1e3a5f';
-const COR_LINHA = '#d0d0d0';
-const COR_ZEBRA = '#f4f6f8';
+
+// Paleta
+const AZUL = '#1e3a5f';        // marinho — timbre e títulos
+const AZUL_CLARO = '#eef3f8';  // fundo de faixa de refeição e zebra
+const TEAL = '#0d9488';        // acento
+const TEXTO = '#1f2937';
+const TEXTO_SUAVE = '#6b7280';
 
 const MESES = [
   'janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho',
@@ -175,6 +182,30 @@ export class PlanoPdfService {
     };
   }
 
+  /** Faixa de topo full-bleed, desenhada em TODAS as páginas. */
+  private desenharTopo(doc: PDFKit.PDFDocument, pagina1: boolean): void {
+    const prof = PROFISSIONAL_PADRAO;
+    const alturaFaixa = pagina1 ? 108 : 84;
+
+    doc.save();
+    doc.rect(0, 0, LARGEMA4, alturaFaixa).fill(AZUL);
+    doc.rect(0, alturaFaixa, LARGEMA4, 4).fill(pagina1 ? TEAL : AZUL);
+    doc.restore();
+
+    // LOGO: quando houver o arquivo, descomentar:
+    // doc.image('assets/logo.png', MARGEM_ESQ, 26, { height: 56 });
+
+    doc.fillColor('#ffffff');
+    doc.font('Helvetica-Bold').fontSize(15)
+      .text('NUTRICIONISTA MATHEUS S CARVALHO', 0, pagina1 ? 34 : 26, {
+        align: 'center', width: LARGEMA4,
+      });
+    doc.font('Helvetica').fontSize(9.5).fillColor('#c7d5e8')
+      .text('Nutrição Clínica Esportiva', { align: 'center', width: LARGEMA4 });
+    doc.font('Helvetica').fontSize(8.5).fillColor('#9fb3cc')
+      .text(`CRN ${prof.conselhoNumero}`, { align: 'center', width: LARGEMA4 });
+  }
+
   gerar(dados: DadosPlano): PDFKit.PDFDocument {
     const prof = PROFISSIONAL_PADRAO;
     const doc = new PDFDocument({
@@ -183,143 +214,171 @@ export class PlanoPdfService {
       info: { Title: `Plano alimentar — ${dados.paciente}` },
     });
 
-    // ── Timbre ────────────────────────────────────────────────────────
-    // LOGO: quando houver o arquivo, descomentar:
-    // doc.image('assets/logo.png', MARGEM_ESQ, MARGEM_SUP - 28, { height: 44 });
+    // ── Faixa de topo (página 1) ──────────────────────────────────────
+    this.desenharTopo(doc, true);
 
-    doc.font('Helvetica-Bold').fontSize(13).fillColor(COR_PRIMARIA)
-      .text('NUTRICIONISTA MATHEUS S CARVALHO', MARGEM_ESQ, MARGEM_SUP, {
-        align: 'center', width: LARGEM_UTIL,
-      });
-    doc.font('Helvetica').fontSize(9).fillColor('#555555')
-      .text('Nutrição Clínica Esportiva', { align: 'center', width: LARGEM_UTIL });
-    doc.fontSize(8.5)
-      .text(`CRN ${prof.conselhoNumero}`, { align: 'center', width: LARGEM_UTIL });
+    // ── Título do documento ───────────────────────────────────────────
+    doc.font('Helvetica-Bold').fontSize(20).fillColor(TEXTO)
+      .text('Plano Alimentar', MARGEM_ESQ, MARGEM_SUP, { width: LARGEM_UTIL });
+    doc.font('Helvetica').fontSize(10.5).fillColor(TEXTO_SUAVE)
+      .text(`Preparado para ${dados.paciente}`, MARGEM_ESQ, doc.y + 4, { width: LARGEM_UTIL });
+    doc.moveDown(0.8);
 
-    doc.moveDown(0.6);
-    const yLinha = doc.y;
-    doc.moveTo(MARGEM_ESQ, yLinha).lineTo(LARGEMA4 - MARGEM_DIR, yLinha)
-      .lineWidth(1).strokeColor(COR_PRIMARIA).stroke();
-    doc.moveDown(1.2);
-
-    // ── Cabeçalho do documento ────────────────────────────────────────
-    doc.font('Helvetica-Bold').fontSize(15).fillColor('#111111')
-      .text('PLANO ALIMENTAR', { align: 'center', width: LARGEM_UTIL });
-    doc.moveDown(0.4);
-    doc.font('Helvetica').fontSize(10).fillColor('#444444')
-      .text(`Paciente: ${dados.paciente}`, { align: 'center', width: LARGEM_UTIL });
-    doc.fontSize(9).fillColor('#666666');
+    // chip: nome do plano · tipo · vigência
     const vigencia = dados.dataInicio
-      ? `Vigência: ${dataCurta(dados.dataInicio)}${dados.dataFim ? ` a ${dataCurta(dados.dataFim)}` : ''}`
-      : '';
-    const sub = [dados.nomePlano, vigencia].filter(Boolean).join(' · ');
-    if (sub) doc.text(sub, { align: 'center', width: LARGEM_UTIL });
-    doc.moveDown(1.4);
+      ? `${dataCurta(dados.dataInicio)}${dados.dataFim ? ` – ${dataCurta(dados.dataFim)}` : ''}`
+      : null;
+    const chip = [dados.nomePlano, dados.tipoPlano, vigencia].filter(Boolean).join('   ·   ');
+    if (chip) {
+      doc.font('Helvetica').fontSize(9);
+      const larguraChip = doc.widthOfString(chip) + 24;
+      const yChip = doc.y;
+      doc.roundedRect(MARGEM_ESQ, yChip, Math.min(larguraChip, LARGEM_UTIL), 22, 11)
+        .fill(AZUL_CLARO);
+      doc.font('Helvetica').fontSize(9).fillColor(AZUL)
+        .text(chip, MARGEM_ESQ + 12, yChip + 6.5, { width: LARGEM_UTIL - 24 });
+      doc.y = yChip + 22;
+    }
+    doc.moveDown(1.2);
 
     // ── Corpo ─────────────────────────────────────────────────────────
     if (dados.tipoPlano === 'Qualitativo' && dados.descricaoQualitativa?.trim()) {
-      doc.font('Helvetica-Bold').fontSize(11).fillColor('#111111')
+      doc.font('Helvetica-Bold').fontSize(11).fillColor(TEXTO)
         .text('Orientações gerais');
-      doc.moveDown(0.5);
-      doc.font('Helvetica').fontSize(10).fillColor('#333333')
+      doc.moveDown(0.4);
+      doc.font('Helvetica').fontSize(10).fillColor(TEXTO)
         .text(dados.descricaoQualitativa.trim(), { align: 'justify', lineGap: 3 });
       doc.moveDown(1.2);
     }
 
     for (const ref of dados.refeicoes) {
       // Quebra de página antes da refeição se não couber o título + 1 item
-      if (doc.y > doc.page.height - MARGEM_INF - 120) {
+      if (doc.y > ALTURA_A4 - MARGEM_INF - 130) {
         doc.addPage();
-        doc.y = MARGEM_SUP;
+        this.desenharTopo(doc, false);
+        doc.y = MARGEM_SUP - 30;
       }
 
-      const tituloRef = ref.horario ? `${ref.nome} — ${ref.horario}` : ref.nome;
-      doc.font('Helvetica-Bold').fontSize(11).fillColor(COR_PRIMARIA)
-        .text(tituloRef.toUpperCase());
-      doc.moveDown(0.3);
+      // ── Faixa de título da refeição ──
+      const yFaixa = doc.y;
+      const alturaFaixa = 26;
+      doc.rect(MARGEM_ESQ, yFaixa, LARGEM_UTIL, alturaFaixa).fill(AZUL_CLARO);
+      doc.rect(MARGEM_ESQ, yFaixa, 4, alturaFaixa).fill(TEAL);
+      doc.font('Helvetica-Bold').fontSize(11).fillColor(AZUL)
+        .text(ref.nome.toUpperCase(), MARGEM_ESQ + 14, yFaixa + 7.5, {
+          width: LARGEM_UTIL - 120,
+        });
+      if (ref.horario) {
+        doc.font('Helvetica-Bold').fontSize(10).fillColor(TEAL)
+          .text(ref.horario, MARGEM_ESQ + LARGEM_UTIL - 90, yFaixa + 8, {
+            width: 76, align: 'right',
+          });
+      }
+      doc.y = yFaixa + alturaFaixa + 8;
 
-      const y0 = doc.y;
-      doc.font('Helvetica-Bold').fontSize(9).fillColor('#555555');
-      doc.text('ALIMENTO', MARGEM_ESQ + 8, y0, { width: LARGEM_UTIL - 150 });
-      doc.text('QUANTIDADE', MARGEM_ESQ + LARGEM_UTIL - 140, y0, { width: 132, align: 'right' });
-      doc.moveDown(0.2);
-      doc.moveTo(MARGEM_ESQ, doc.y).lineTo(LARGEMA4 - MARGEM_DIR, doc.y)
-        .lineWidth(0.7).strokeColor(COR_LINHA).stroke();
-      doc.moveDown(0.25);
-
-      doc.font('Helvetica').fontSize(10);
+      // ── Itens ──
       let zebra = false;
       for (const it of ref.itens) {
-        const alturaEstimada = 16 + it.substitutos.length * 12;
-        if (doc.y + alturaEstimada > doc.page.height - MARGEM_INF - 24) {
+        doc.font('Helvetica').fontSize(10);
+        const nomeAltura = Math.max(
+          1,
+          Math.ceil(doc.widthOfString(it.nome) / (LARGEM_UTIL - 170)),
+        );
+        const alturaItem = 10 + nomeAltura * 13 + it.substitutos.length * 11;
+        if (doc.y + alturaItem > ALTURA_A4 - MARGEM_INF - 20) {
           doc.addPage();
-          doc.y = MARGEM_SUP;
+          this.desenharTopo(doc, false);
+          doc.y = MARGEM_SUP - 30;
         }
         const yItem = doc.y;
-        const fundo = zebra ? COR_ZEBRA : '#ffffff';
-        doc.rect(MARGEM_ESQ, yItem - 3, LARGEM_UTIL, alturaEstimada).fill(fundo);
-        doc.fillColor('#111111');
+        doc.rect(MARGEM_ESQ, yItem, LARGEM_UTIL, alturaItem)
+          .fill(zebra ? AZUL_CLARO : '#ffffff');
 
-        doc.font('Helvetica').fontSize(10)
-          .text(it.nome, MARGEM_ESQ + 8, yItem, { width: LARGEM_UTIL - 160 });
-        doc.font('Helvetica-Bold').fontSize(10)
-          .text(it.medida, MARGEM_ESQ + LARGEM_UTIL - 140, yItem, { width: 132, align: 'right' });
+        doc.font('Helvetica').fontSize(10).fillColor(TEXTO)
+          .text(it.nome, MARGEM_ESQ + 14, yItem + 7, { width: LARGEM_UTIL - 170 });
+        doc.font('Helvetica-Bold').fontSize(10).fillColor(AZUL)
+          .text(it.medida, MARGEM_ESQ + LARGEM_UTIL - 150, yItem + 7, {
+            width: 136, align: 'right',
+          });
 
-        let yAtual = doc.y;
+        let ySub = doc.y;
         for (const sub of it.substitutos) {
-          yAtual = doc.y;
-          doc.font('Helvetica').fontSize(8.5).fillColor('#777777')
-            .text(`ou ${sub}`, MARGEM_ESQ + 16, yAtual, { width: LARGEM_UTIL - 24 });
+          ySub = doc.y;
+          doc.font('Helvetica').fontSize(8.5).fillColor(TEXTO_SUAVE)
+            .text(`ou  ${sub}`, MARGEM_ESQ + 26, ySub, { width: LARGEM_UTIL - 40 });
         }
 
-        // avançar para depois do maior bloco (nome pode ocupar 2 linhas)
-        doc.y = Math.max(doc.y, yItem + alturaEstimada - 8);
+        doc.y = Math.max(doc.y, yItem + alturaItem);
         doc.x = MARGEM_ESQ;
         zebra = !zebra;
       }
 
       doc.x = MARGEM_ESQ;
-      doc.moveDown(1);
+      doc.moveDown(0.9);
     }
 
-    // ── Água + orientações fixas ──────────────────────────────────────
-    if (doc.y > doc.page.height - MARGEM_INF - 150) {
-      doc.addPage();
-      doc.y = MARGEM_SUP;
-    }
-    doc.moveDown(0.5);
+    // ── Hidratação ────────────────────────────────────────────────────
     if (dados.metaAguaLitros && dados.metaAguaLitros > 0) {
-      doc.font('Helvetica-Bold').fontSize(10).fillColor('#111111')
-        .text(`Hidratação: ${dados.metaAguaLitros.toLocaleString('pt-BR')} litros de água por dia`);
-      doc.moveDown(0.6);
+      if (doc.y > ALTURA_A4 - MARGEM_INF - 120) {
+        doc.addPage();
+        this.desenharTopo(doc, false);
+        doc.y = MARGEM_SUP - 30;
+      }
+      doc.moveDown(0.4);
+      const yAgua = doc.y;
+      doc.roundedRect(MARGEM_ESQ, yAgua, LARGEM_UTIL, 30, 6).fill(AZUL_CLARO);
+      doc.font('Helvetica-Bold').fontSize(10).fillColor(AZUL)
+        .text(
+          `Hidratação diária: ${dados.metaAguaLitros.toLocaleString('pt-BR')} litros de água`,
+          MARGEM_ESQ + 14, yAgua + 9, { width: LARGEM_UTIL - 28 },
+        );
+      doc.y = yAgua + 30;
+      doc.x = MARGEM_ESQ;
     }
-    doc.font('Helvetica').fontSize(8.5).fillColor('#666666')
+
+    // ── Nota de individualidade ───────────────────────────────────────
+    doc.moveDown(0.8);
+    doc.font('Helvetica-Oblique').fontSize(8.5).fillColor(TEXTO_SUAVE)
       .text(
-        'Este plano alimentar é individualizado e foi elaborado a partir da sua avaliação nutricional. ' +
+        'Este plano alimentar é individualizado, elaborado a partir da sua avaliação nutricional. ' +
         'Não deve ser compartilhado ou seguido por terceiros. Em caso de dúvida, fale com seu nutricionista.',
         { align: 'justify', lineGap: 2 },
       );
 
-    // ── Rodapé com assinatura ─────────────────────────────────────────
-    const yAssinatura = Math.max(doc.y + 40, doc.page.height - MARGEM_INF - 90);
-    if (yAssinatura + 70 > doc.page.height - MARGEM_INF) {
+    // ── Assinatura ────────────────────────────────────────────────────
+    let yAssinatura = Math.max(doc.y + 46, ALTURA_A4 - MARGEM_INF - 84);
+    if (yAssinatura + 64 > ALTURA_A4 - MARGEM_INF) {
       doc.addPage();
-      doc.y = MARGEM_SUP + 40;
+      this.desenharTopo(doc, false);
+      yAssinatura = MARGEM_SUP + 20;
+      doc.y = yAssinatura;
     }
     doc.x = MARGEM_ESQ;
     doc.y = yAssinatura;
-    doc.font('Helvetica').fontSize(9).fillColor('#444444')
+    doc.font('Helvetica').fontSize(9).fillColor(TEXTO_SUAVE)
       .text(`São Paulo, ${dataExtenso(new Date())}.`, { align: 'center', width: LARGEM_UTIL });
-    doc.moveDown(2.2);
+    doc.moveDown(2.4);
     const yRisco = doc.y;
     doc.moveTo(LARGEMA4 / 2 - 110, yRisco).lineTo(LARGEMA4 / 2 + 110, yRisco)
-      .lineWidth(0.8).strokeColor('#444444').stroke();
+      .lineWidth(0.8).strokeColor(TEXTO_SUAVE).stroke();
     doc.y = yRisco + 8;
-    doc.font('Helvetica-Bold').fontSize(10).fillColor('#111111')
+    doc.font('Helvetica-Bold').fontSize(10).fillColor(TEXTO)
       .text(prof.nome, { align: 'center', width: LARGEM_UTIL });
-    doc.font('Helvetica').fontSize(8.5).fillColor('#555555')
+    doc.font('Helvetica').fontSize(8.5).fillColor(TEXTO_SUAVE)
       .text(prof.especialidade, { align: 'center', width: LARGEM_UTIL });
     doc.text(`CRN ${prof.conselhoNumero}`, { align: 'center', width: LARGEM_UTIL });
+
+    // ── Paginação em todas as páginas ─────────────────────────────────
+    doc.flushPages();
+    const total = doc.bufferedPageRange().count;
+    for (let i = 0; i < total; i++) {
+      doc.switchToPage(i);
+      doc.font('Helvetica').fontSize(8).fillColor(TEXTO_SUAVE)
+        .text(
+          `Página ${i + 1} de ${total}`,
+          MARGEM_ESQ, ALTURA_A4 - 34, { width: LARGEM_UTIL, align: 'center' },
+        );
+    }
 
     doc.end();
     return doc;
