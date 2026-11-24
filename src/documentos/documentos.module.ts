@@ -1,11 +1,17 @@
 import { Module } from '@nestjs/common';
 import { DocumentosController } from './documentos.controller';
 import { DocumentosService } from './documentos.service';
-import { PrismaModule } from '../prisma/prisma.module';
+import { PlanoPdfService } from './plano-pdf.service';
+import { PacientesModule } from '../pacientes/pacientes.module';
 
+/**
+ * Documentos PDF: atestado, recibo, documento livre e plano alimentar timbrado.
+ * PrismaModule é @Global no app.module.
+ */
 @Module({
-  imports: [PrismaModule],
+  imports: [PacientesModule],
   controllers: [DocumentosController],
-  providers: [DocumentosService],
+  providers: [DocumentosService, PlanoPdfService],
+  exports: [PlanoPdfService],
 })
 export class DocumentosModule {}
