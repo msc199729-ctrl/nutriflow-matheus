@@ -7,20 +7,28 @@
  *   npx tsx prisma/scripts/match-micros-por-nome.ts            # relatório (nada grava)
  *   npx tsx prisma/scripts/match-micros-por-nome.ts --aplicar  # grava de verdade
  *
+ * DUAS CAMADAS DE DECISÃO:
+ *
+ * 1. MAPA MANUAL (constante MANUAL) — para os ~40 canônicos conhecidos. Cada
+ *    entrada diz os tokens obrigatórios, o que EVITAR e o que PREFERIR na
+ *    descrição TBCA. Existe porque o relatório automático (v2) propôs erros
+ *    que só revisão humana pega: "Leite de vaca desnatado" casou com
+ *    "desnatado EM PÓ" (score 0,85) em vez do fluído — leite em pó tem ~4x
+ *    os nutrientes/100 g.
+ *
+ * 2. REGRA GENÉRICA — para qualquer alimento fora do mapa: similaridade
+ *    (Jaccard + cobertura) com margem sobre o 2º colocado.
+ *
  * SALVAGUARDAS (por que é seguro):
  *   1. Só toca em alimento com TODOS os 23 micros nulos (não sobrescreve nada).
- *   2. Match por similaridade de nome (Jaccard + cobertura, com radical leve:
- *      grelhado/grelhada empatam).
- *   3. Alimento COM classeTbca: só casa dentro da própria classe.
- *   4. Alimento SEM classeTbca (os canônicos criados à mão): pool global,
- *      mas exigindo score mais alto e margem sobre o 2º colocado.
- *   5. Se duas linhas da TBCA empatam em cima, NÃO casa: marca para revisão.
- *   6. Validações do importador (teto de sanidade, soma de ácidos graxos)
+ *   2. Manual: tokens obrigatórios + lista de exclusão + ranking por preferência;
+ *      empate real no topo NÃO casa (vai para revisão).
+ *   3. Genérico: alimento COM classeTbca só casa na própria classe; SEM classe
+ *      usa pool global com threshold 0.60 + margem sobre o 2º.
+ *   4. Validações do importador (teto de sanidade, soma de ácidos graxos)
  *      são aplicadas antes de gravar.
- *   7. Atribui codigoTbca? NÃO — o campo é @unique e o alimento canônico não
+ *   5. Atribui codigoTbca? NÃO — o campo é @unique e o alimento canônico não
  *      é uma linha TBCA. Deixa null; a rastreabilidade fica no relatório.
- *
- * O relatório mostra cada casamento com o score, para revisão.
  */
 
 import 'dotenv/config';
@@ -106,7 +114,7 @@ type Linha = {
 /** Stopwords de descrição de alimento (PT-BR). */
 const STOPWORDS = new Set(['de', 'da', 'do', 'das', 'dos', 'com', 'em', 'e', 'a', 'o', 'sem']);
 
-/** Radical aproximado: grelhado/grelhada -> grelhad, feijões -> feijõ. */
+/** Radical aproximado: grelhado/grelhada -> grelhad, feijões -> feijo. */
 function radical(t: string): string {
   if (t.length > 5 && t.endsWith('es')) return t.slice(0, -2);
   if (t.length > 4 && (t.endsWith('os') || t.endsWith('as'))) return t.slice(0, -2);
@@ -127,10 +135,14 @@ function normalizar(s: string): string[] {
     .map(radical);
 }
 
+/** Só tira acento e minúscula — para checar substring na descrição crua. */
+function tiraAcento(s: string): string {
+  return (s ?? '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
 /**
  * Similaridade entre nomes de alimento: 60% Jaccard de tokens + 40% cobertura
- * (fração dos tokens do MENOR nome presentes no maior). Cobertura alta com
- * Jaccard médio é o padrão "nome canônico é subconjunto da descrição TBCA".
+ * (fração dos tokens do MENOR nome presentes no maior).
  */
 function similaridade(a: string[], b: string[]): number {
   if (a.length === 0 || b.length === 0) return 0;
@@ -145,6 +157,69 @@ function similaridade(a: string[], b: string[]): number {
   for (const t of menor) if (maior.has(t)) cobertos += 1;
   const cobertura = menor.size ? cobertos / menor.size : 0;
   return 0.6 * jaccard + 0.4 * cobertura;
+}
+
+// ── MAPA MANUAL (revisão humana sobre o relatório automático) ────────
+//
+// Chave = nome canônico como está no banco (a chave é normalizada antes de
+// casar). tokens = TODOS devem existir na descrição TBCA. evitar = substring
+// que INVALIDA a linha. preferir = substring que SOBE a linha no ranking.
+//
+// Convenção: quando o nome canônico não especifica sal/óleo, preferir a
+// variante "s/ sal" e "s/ óleo" da TBCA (preparação padrão, sem tempero).
+
+const MANUAL: Record<string, { tokens: string[]; evitar?: string[]; preferir?: string[] }> = {
+  'Frango peito grelhado sem pele': { tokens: ['frango', 'peito', 'grelhado'], evitar: ['coxa', 'sobrecoxa', 'asa', 'gema', 'fígado'], preferir: ['s/ pele', 's/ sal'] },
+  'Frango peito cozido sem pele': { tokens: ['frango', 'peito', 'cozido'], evitar: ['coxa', 'sobrecoxa', 'asa', 'gema'], preferir: ['s/ pele', 's/ sal'] },
+  'Frango coxa cozida sem pele': { tokens: ['frango', 'coxa', 'cozido'], evitar: ['sobrecoxa'], preferir: ['s/ pele', 's/ sal'] },
+  'Frango sobrecoxa assada sem pele': { tokens: ['frango', 'sobrecoxa', 'assado'], evitar: ['c/ pele'], preferir: ['s/ pele', 's/ sal'] },
+  'Ovo de galinha cozido': { tokens: ['ovo', 'galinha', 'cozido'], evitar: ['gema', 'clara', 'frito', 'mexido', 'omelete'], preferir: ['inteiro', 's/ sal'] },
+  'Ovo de galinha frito': { tokens: ['ovo', 'galinha', 'frito'], evitar: ['gema', 'clara', 'cozido', 'mexido'], preferir: ['inteiro', 's/ sal'] },
+  'Carne bovina patinho grelhado sem gordura': { tokens: ['patinho', 'grelhado'], evitar: ['porco', 'suín', 'frango'], preferir: ['s/ gordura', 's/ sal'] },
+  'Carne bovina acém cozido sem gordura': { tokens: ['acém', 'cozido'], evitar: ['porco', 'suín', 'frango'], preferir: ['s/ gordura', 's/ sal'] },
+  'Carne suína lombo assado': { tokens: ['lombo', 'assado'], evitar: ['bovina', 'boi', 'frango'], preferir: ['suín', 'porco', 's/ sal'] },
+  'Peixe tilápia grelhada': { tokens: ['tilápia', 'grelhado'], preferir: ['s/ óleo', 's/ sal'] },
+  'Peixe salmão grelhado': { tokens: ['salmão', 'grelhado'], preferir: ['s/ óleo', 's/ sal'] },
+  'Atum em água drenado': { tokens: ['atum'], evitar: ['óleo'], preferir: ['água', 'escorrido'] },
+  'Arroz branco cozido': { tokens: ['arroz', 'cozido'], evitar: ['integral', 'doce', 'feijão', 'frito', 'carne'], preferir: ['polido', 'branco', 's/ sal', 's/ óleo'] },
+  'Arroz integral cozido': { tokens: ['arroz', 'integral', 'cozido'], evitar: ['doce', 'leite', 'condensado', 'feijão'], preferir: ['s/ sal', 's/ óleo'] },
+  'Feijão carioca cozido': { tokens: ['feijão', 'carioca', 'cozido'], evitar: ['arroz'], preferir: ['s/ óleo', 's/ sal'] },
+  'Feijão preto cozido': { tokens: ['feijão', 'preto', 'cozido'], evitar: ['arroz'], preferir: ['s/ óleo', 's/ sal'] },
+  'Lentilha cozida': { tokens: ['lentilha', 'cozido'], preferir: ['s/ óleo', 's/ sal'] },
+  'Mandioca cozida': { tokens: ['mandioca', 'cozido'], preferir: ['s/ óleo', 's/ sal'] },
+  'Mamão papaia': { tokens: ['mamão'], evitar: ['suco', 'vitamina', 'doce', 'geleia', 'creme'], preferir: ['in natura', 'papaia'] },
+  'Iogurte natural integral': { tokens: ['iogurte', 'natural'], evitar: ['morango', 'aveia', 'mel', 'desnatado', 'light', 'grego'], preferir: ['integral'] },
+  'Azeite de oliva extra virgem': { tokens: ['azeite', 'oliva'], preferir: ['extra virgem', 'extravirgem'] },
+  'Castanha do Pará': { tokens: ['castanha'], evitar: ['caju', 'doce', 'bolo', 'sobremesa'], preferir: ['pará'] },
+  'Leite de vaca desnatado': { tokens: ['leite', 'desnatado'], evitar: ['em pó', 'chocolate', 'achocolatado', 'condensado', 'fermentado', 'iogurte'], preferir: ['fluído', 'fluido'] },
+  'Leite de vaca integral': { tokens: ['leite', 'integral'], evitar: ['em pó', 'chocolate', 'condensado', 'fermentado', 'iogurte', 'arroz', 'doce', 'canela', 'vitamina'], preferir: ['fluído', 'fluido'] },
+  'Óleo de soja': { tokens: ['óleo', 'soja'], evitar: ['salada', 'margarina', 'maionese'], preferir: ['glycine'] },
+  'Amêndoa': { tokens: ['amêndoa'], evitar: ['torrone', 'caramelizada', 'doce', 'torta', 'bolo', 'chocolate'], preferir: ['crua', 'in natura'] },
+  'Brócolis cozido': { tokens: ['brócolis', 'cozido'], preferir: ['s/ óleo', 's/ sal'] },
+  'Cenoura crua': { tokens: ['cenoura', 'crua'], evitar: ['cozido', 'suco', 'bolo'], preferir: ['s/ casca'] },
+  'Alface crespa': { tokens: ['alface', 'crespa'], evitar: ['sanduíche'], preferir: ['crua'] },
+  'Batata doce cozida': { tokens: ['batata', 'doce', 'cozido'], evitar: ['inglesa', 'frito', 'palito'], preferir: ['s/ óleo', 's/ sal', 's/ casca'] },
+  'Batata inglesa cozida': { tokens: ['batata', 'inglesa', 'cozido'], evitar: ['camarão', 'ricota', 'espinafre', 'muçarela', 'frito', 'palha'], preferir: ['s/ óleo', 's/ sal', 's/ casca'] },
+  'Macarrão cozido': { tokens: ['macarrão', 'cozido'], evitar: ['arroz', 'nhoque', 'lasanha', 'sopa'], preferir: ['trigo', 's/ ovos', 'drenado', 's/ sal'] },
+  'Aveia em flocos': { tokens: ['aveia', 'flocos'], evitar: ['iogurte', 'bolo', 'cookie', 'vitamina', 'biscoito'], preferir: ['crua', 'integral'] },
+  'Pão de forma integral': { tokens: ['pão', 'forma', 'integral'], evitar: ['sanduíche', 'requeijão', 'presunto', 'light'], preferir: ['integral'] },
+  'Tapioca': { tokens: ['tapioca'], evitar: ['coco', 'queijo', 'carne', 'banana', 'chocolate'], preferir: ['sem recheio', 'sem manteiga'] },
+  'Laranja pera': { tokens: ['laranja', 'pera'], evitar: ['suco', 'doce', 'bolo', 'vitamina'], preferir: ['in natura'] },
+  'Morango': { tokens: ['morango'], evitar: ['geleia', 'torta', 'bolo', 'suco', 'iogurte', 'sorvete', 'calda', 'chocolate'], preferir: ['in natura', 'cru'] },
+  'Whey protein concentrado': { tokens: ['whey'], preferir: ['concentrado'] },
+  'Tomate cru': { tokens: ['tomate', 'cru'], evitar: ['molho', 'concentrado', 'seco', 'cereja', 'salada'], preferir: ['in natura', 'lycopersicon'] },
+};
+
+type EntradaManual = { tokens: Set<string>; evitar: string[]; preferir: string[] };
+
+/** Índice do mapa com chaves e tokens já normalizados. */
+const MANUAL_IDX = new Map<string, EntradaManual>();
+for (const [k, v] of Object.entries(MANUAL)) {
+  MANUAL_IDX.set(normalizar(k).join(' '), {
+    tokens: new Set(v.tokens.flatMap((t) => normalizar(t))),
+    evitar: (v.evitar ?? []).map(tiraAcento),
+    preferir: (v.preferir ?? []).map(tiraAcento),
+  });
 }
 
 // ── Extração de micros (igual ao importador) ─────────────────────────
@@ -229,7 +304,80 @@ type Match = {
   score: number;
   segundo: Candidato | null;
   scoreSegundo: number;
+  manual: boolean;
 };
+
+type ResultadoManual = {
+  melhor: Candidato | null;
+  segundo: Candidato | null;
+  score: number;
+  scoreSegundo: number;
+  ambiguo: boolean;
+  opcoes: Array<{ d: string; s: number }>;
+  motivo: string;
+};
+
+/**
+ * Seleção manual: filtra o pool pelos tokens obrigatórios e exclusões,
+ * ranqueia por (preferências, menos tokens extras, descrição mais curta).
+ * Empate real no topo -> ambíguo, para revisão humana.
+ */
+function selecionarManual(entry: EntradaManual, pool: Candidato[], tokensAlvo: string[]): ResultadoManual {
+  const vivos = pool.filter((c) => {
+    const desc = tiraAcento(c.descricao);
+    if (entry.evitar.some((s) => desc.includes(s))) return false;
+    const set = new Set(c.tokens);
+    for (const t of entry.tokens) if (!set.has(t)) return false;
+    return true;
+  });
+
+  if (vivos.length === 0) {
+    return { melhor: null, segundo: null, score: 0, scoreSegundo: 0, ambiguo: false, opcoes: [], motivo: 'nenhuma linha TBCA passa nos filtros' };
+  }
+
+  const scored = vivos.map((c) => {
+    const desc = tiraAcento(c.descricao);
+    const prefer = entry.preferir.filter((s) => desc.includes(s)).length;
+    const extras = c.tokens.filter((t) => !entry.tokens.has(t)).length;
+    return { c, prefer, extras, sim: similaridade(tokensAlvo, c.tokens) };
+  });
+
+  scored.sort(
+    (a, b) =>
+      b.prefer - a.prefer ||
+      a.extras - b.extras ||
+      a.c.descricao.length - b.c.descricao.length,
+  );
+
+  const top = scored[0];
+  const second = scored[1];
+
+  // Empate real: mesmo nº de preferências e mesmos extras -> revisão humana.
+  if (second && second.prefer === top.prefer && second.extras === top.extras) {
+    return {
+      melhor: null,
+      segundo: null,
+      score: top.sim,
+      scoreSegundo: second.sim,
+      ambiguo: true,
+      opcoes: [
+        { d: top.c.descricao, s: top.sim },
+        { d: second.c.descricao, s: second.sim },
+      ],
+      motivo: 'empate entre duas linhas',
+    };
+  }
+
+  return {
+    melhor: top.c,
+    segundo: second?.c ?? null,
+    score: top.sim,
+    scoreSegundo: second?.sim ?? 0,
+    ambiguo: false,
+    opcoes: [],
+    motivo: '',
+  };
+}
 
 async function main() {
   const aplicar = process.argv.includes('--aplicar');
@@ -302,10 +450,9 @@ async function main() {
   }
   console.log(`Linhas TBCA úteis (≥10 micros): ${linhasUteis}, indexadas por classe.`);
 
-  // 3. Para cada alvo, procurar o melhor candidato.
+  // 3. Para cada alvo: mapa manual primeiro; regra genérica como fallback.
   const matches: Match[] = [];
   const ambiguos: Array<{ nome: string; classe: string | null; opcoes: Array<{ d: string; s: number }> }> = [];
-  const semClasse: string[] = [];
   const semCandidato: string[] = [];
 
   // Todos os candidatos num array único, para alvo sem classeTbca.
@@ -315,10 +462,33 @@ async function main() {
     const nomeAlvo = alvo.nomeExibicao || alvo.nome;
     const tokensAlvo = normalizar(nomeAlvo);
     const classeAlimento = alvo.classeTbca;
+    const manual = MANUAL_IDX.get(tokensAlvo.join(' '));
 
-    // Alvo COM classe conhecida: pool restrito à classe, threshold 0.55.
-    // Alvo SEM classe (os canônicos criados à mão): pool global, exigindo
-    // score mais alto — sem a âncora da classe, o nome sozinho decide.
+    // ── Camada 1: mapa manual ──
+    if (manual) {
+      const r = selecionarManual(manual, todos, tokensAlvo);
+      if (!r.melhor && !r.ambiguo) {
+        semCandidato.push(`${nomeAlvo} (manual: ${r.motivo})`);
+        continue;
+      }
+      if (r.ambiguo) {
+        ambiguos.push({ nome: `${nomeAlvo} [manual]`, classe: classeAlimento, opcoes: r.opcoes });
+        continue;
+      }
+      matches.push({
+        idAlimento: alvo.id,
+        nome: nomeAlvo,
+        classeAlimento,
+        match: r.melhor!,
+        score: r.score,
+        segundo: r.segundo,
+        scoreSegundo: r.scoreSegundo,
+        manual: true,
+      });
+      continue;
+    }
+
+    // ── Camada 2: regra genérica ──
     const temClasse = !!classeAlimento && porClasse.has(classeAlimento);
     const pool = temClasse ? porClasse.get(classeAlimento)! : todos;
     const threshold = temClasse ? 0.55 : 0.60;
@@ -346,8 +516,6 @@ async function main() {
       continue;
     }
 
-    // Margem exigida sobre o 2º: 0.05 com score alto (nome quase idêntico),
-    // 0.10 com score médio (nome só parecido).
     const margemExigida = scoreMelhor >= 0.8 ? 0.05 : 0.10;
     if (scoreSegundo >= scoreMelhor - margemExigida) {
       ambiguos.push({
@@ -369,16 +537,17 @@ async function main() {
       score: scoreMelhor,
       segundo,
       scoreSegundo,
+      manual: false,
     });
   }
 
   // 4. Relatório.
   console.log('\n════════════════════════════════════════════════');
-  console.log(`CASAMENTOS PROPOSTOS: ${matches.length}`);
+  console.log(`CASAMENTOS PROPOSTOS: ${matches.length} (${matches.filter((m) => m.manual).length} pelo mapa manual)`);
   console.log('════════════════════════════════════════════════');
-  for (const m of matches.sort((a, b) => b.score - a.score)) {
+  for (const m of matches.sort((a, b) => Number(b.manual) - Number(a.manual) || b.score - a.score)) {
     console.log(
-      `  ${m.nome.padEnd(40)} -> [${m.match.classe}] ${m.match.descricao.slice(0, 40).padEnd(42)}` +
+      `  ${m.manual ? '[manual] ' : ''}${m.nome.padEnd(40)} -> [${m.match.classe}] ${m.match.descricao.slice(0, 40).padEnd(42)}` +
       `score ${m.score.toFixed(2)}${m.segundo ? ` (2º: ${m.segundo.descricao.slice(0, 26)} ${m.scoreSegundo.toFixed(2)})` : ''}`,
     );
   }
@@ -398,10 +567,6 @@ async function main() {
     console.log(`SEM CANDIDATO: ${semCandidato.length}`);
     console.log('════════════════════════════════════════════════');
     for (const s of semCandidato) console.log('  ' + s);
-  }
-
-  if (semClasse.length > 0) {
-    console.log(`\nSem classeTbca (casaram pelo pool global): ${semClasse.length}`);
   }
 
   // 5. Aplicar (só com --aplicar).
