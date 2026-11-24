@@ -8,14 +8,16 @@
  *   npx tsx prisma/scripts/match-micros-por-nome.ts --aplicar  # grava de verdade
  *
  * SALVAGUARDAS (por que é seguro):
- *   1. Só toca em alimento SEM nenhum micronutriente (não sobrescreve nada).
- *   2. Match exige similaridade de nome alta (Jaccard + cobertura de tokens).
- *   3. Exige a MESMA classe TBCA (ex.: "Vegetais" com "Vegetais") — brócolis
- *      não casa com suplemento.
- *   4. Se duas linhas da TBCA empatam em cima, NÃO casa: marca para revisão.
- *   5. Validações do importador (teto de sanidade, soma de ácidos graxos)
+ *   1. Só toca em alimento com TODOS os 23 micros nulos (não sobrescreve nada).
+ *   2. Match por similaridade de nome (Jaccard + cobertura, com radical leve:
+ *      grelhado/grelhada empatam).
+ *   3. Alimento COM classeTbca: só casa dentro da própria classe.
+ *   4. Alimento SEM classeTbca (os canônicos criados à mão): pool global,
+ *      mas exigindo score mais alto e margem sobre o 2º colocado.
+ *   5. Se duas linhas da TBCA empatam em cima, NÃO casa: marca para revisão.
+ *   6. Validações do importador (teto de sanidade, soma de ácidos graxos)
  *      são aplicadas antes de gravar.
- *   6. Atribui codigoTbca? NÃO — o campo é @unique e o alimento canônico não
+ *   7. Atribui codigoTbca? NÃO — o campo é @unique e o alimento canônico não
  *      é uma linha TBCA. Deixa null; a rastreabilidade fica no relatório.
  *
  * O relatório mostra cada casamento com o score, para revisão.
@@ -101,7 +103,18 @@ type Linha = {
 
 // ── Normalização e similaridade ──────────────────────────────────────
 
-/** Remove acentos, minúsculas, tira ruído e stopwords de descrição de alimento. */
+/** Stopwords de descrição de alimento (PT-BR). */
+const STOPWORDS = new Set(['de', 'da', 'do', 'das', 'dos', 'com', 'em', 'e', 'a', 'o', 'sem']);
+
+/** Radical aproximado: grelhado/grelhada -> grelhad, feijões -> feijõ. */
+function radical(t: string): string {
+  if (t.length > 5 && t.endsWith('es')) return t.slice(0, -2);
+  if (t.length > 4 && (t.endsWith('os') || t.endsWith('as'))) return t.slice(0, -2);
+  if (t.length > 4 && (t.endsWith('o') || t.endsWith('a'))) return t.slice(0, -1);
+  return t;
+}
+
+/** Remove acentos, minúsculas, tira ruído/stopwords e aplica radical leve. */
 function normalizar(s: string): string[] {
   return (s ?? '')
     .toLowerCase()
@@ -110,7 +123,8 @@ function normalizar(s: string): string[] {
     .replace(/[^a-z0-9\s]/g, ' ')
     .split(/\s+/)
     .filter((t) => t.length > 1)
-    .filter((t) => !['de', 'da', 'do', 'das', 'dos', 'com', 'em', 'e', 'a', 'o'].includes(t));
+    .filter((t) => !STOPWORDS.has(t))
+    .map(radical);
 }
 
 /**
@@ -288,23 +302,27 @@ async function main() {
   }
   console.log(`Linhas TBCA úteis (≥10 micros): ${linhasUteis}, indexadas por classe.`);
 
-  // 3. Para cada alvo, procurar o melhor candidato na MESMA classe.
+  // 3. Para cada alvo, procurar o melhor candidato.
   const matches: Match[] = [];
   const ambiguos: Array<{ nome: string; classe: string | null; opcoes: Array<{ d: string; s: number }> }> = [];
   const semClasse: string[] = [];
   const semCandidato: string[] = [];
+
+  // Todos os candidatos num array único, para alvo sem classeTbca.
+  const todos: Candidato[] = [...porClasse.values()].flat();
 
   for (const alvo of alvos) {
     const nomeAlvo = alvo.nomeExibicao || alvo.nome;
     const tokensAlvo = normalizar(nomeAlvo);
     const classeAlimento = alvo.classeTbca;
 
-    if (!classeAlimento || !porClasse.has(classeAlimento)) {
-      semClasse.push(nomeAlvo);
-      continue;
-    }
+    // Alvo COM classe conhecida: pool restrito à classe, threshold 0.55.
+    // Alvo SEM classe (os canônicos criados à mão): pool global, exigindo
+    // score mais alto — sem a âncora da classe, o nome sozinho decide.
+    const temClasse = !!classeAlimento && porClasse.has(classeAlimento);
+    const pool = temClasse ? porClasse.get(classeAlimento)! : todos;
+    const threshold = temClasse ? 0.55 : 0.60;
 
-    const pool = porClasse.get(classeAlimento)!;
     let melhor: Candidato | null = null;
     let scoreMelhor = 0;
     let segundo: Candidato | null = null;
@@ -323,13 +341,15 @@ async function main() {
       }
     }
 
-    if (!melhor || scoreMelhor < 0.55) {
+    if (!melhor || scoreMelhor < threshold) {
       semCandidato.push(`${nomeAlvo} (melhor score ${scoreMelhor.toFixed(2)})`);
       continue;
     }
 
-    // Ambiguidade: segundo muito perto do primeiro -> não casa automaticamente.
-    if (scoreSegundo >= scoreMelhor - 0.05 && scoreSegundo > 0.55) {
+    // Margem exigida sobre o 2º: 0.05 com score alto (nome quase idêntico),
+    // 0.10 com score médio (nome só parecido).
+    const margemExigida = scoreMelhor >= 0.8 ? 0.05 : 0.10;
+    if (scoreSegundo >= scoreMelhor - margemExigida) {
       ambiguos.push({
         nome: nomeAlvo,
         classe: classeAlimento,
@@ -358,8 +378,8 @@ async function main() {
   console.log('════════════════════════════════════════════════');
   for (const m of matches.sort((a, b) => b.score - a.score)) {
     console.log(
-      `  ${m.nome.padEnd(40)} -> ${m.match.descricao.slice(0, 44).padEnd(46)}` +
-      `score ${m.score.toFixed(2)}${m.segundo ? ` (2º: ${m.segundo.descricao.slice(0, 30)} ${m.scoreSegundo.toFixed(2)})` : ''}`,
+      `  ${m.nome.padEnd(40)} -> [${m.match.classe}] ${m.match.descricao.slice(0, 40).padEnd(42)}` +
+      `score ${m.score.toFixed(2)}${m.segundo ? ` (2º: ${m.segundo.descricao.slice(0, 26)} ${m.scoreSegundo.toFixed(2)})` : ''}`,
     );
   }
 
@@ -375,14 +395,13 @@ async function main() {
 
   if (semCandidato.length > 0) {
     console.log('\n════════════════════════════════════════════════');
-    console.log(`SEM CANDIDATO NA CLASSE: ${semCandidato.length}`);
+    console.log(`SEM CANDIDATO: ${semCandidato.length}`);
     console.log('════════════════════════════════════════════════');
     for (const s of semCandidato) console.log('  ' + s);
   }
 
   if (semClasse.length > 0) {
-    console.log(`\nSem classeTbca ou classe sem linhas no dump: ${semClasse.length}`);
-    for (const s of semClasse.slice(0, 20)) console.log('  ' + s);
+    console.log(`\nSem classeTbca (casaram pelo pool global): ${semClasse.length}`);
   }
 
   // 5. Aplicar (só com --aplicar).
