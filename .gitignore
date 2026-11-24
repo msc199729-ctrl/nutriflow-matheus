@@ -59,3 +59,18 @@ pids
 report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 
 nutriflow-frontend/
+
+# ── Pacote do instalador e artefatos de manutenção (não são código) ──
+# pasta do instalador Python com cópias duplicadas dos arquivos
+nutriflow/
+# backups de edição
+*.bak
+# cache Python do instalador
+__pycache__/
+# relatórios e logs de limpeza de nomes
+auditoria-nomes.csv
+limpeza-block.txt
+# backups de dados (manter fora do git; exportar quando precisar)
+backup-alimentos-*.json
+# preview de e-mail gerado em teste
+mail-preview-*.html
