@@ -1,0 +1,176 @@
+{"code": "0011150949880", "nome": "Roasted & Salted Peanuts", "marca": "Roundy's", "nova": 3, "kcal": 1680, "prot": 73.1, "carb": 51.1, "gord": 131, "fibra": 21.9, "sodio_mg": 1.17}
+{"code": "0011150949903", "nome": "Hot & Spicy Peanuts", "marca": "Roundy's", "nova": 4, "kcal": 1680, "prot": 65.7, "carb": 58.4, "gord": 131, "fibra": 14.6, "sodio_mg": 1.83}
+{"code": "0011150949927", "nome": "Pak O Snax", "marca": "Roundy's", "nova": 4, "kcal": 1320, "prot": 29.2, "carb": 153, "gord": 65.7, "fibra": 7.3, "sodio_mg": 0.438}
+{"code": "0011150950268", "nome": "Raw Cashews", "marca": "Roundy's", "nova": 1, "kcal": 1860, "prot": 58.6, "carb": 97.7, "gord": 137, "fibra": 9.69, "sodio_mg": 0.05}
+{"code": "0011150980753", "nome": "Cashews Roasted & Salted", "marca": "Roundys", "nova": 3, "kcal": 1900, "prot": 48.8, "carb": 97.7, "gord": 146, "fibra": 9.69, "sodio_mg": 0.975}
+{"code": "0011150980784", "nome": "Delux Mixed Nuts", "marca": "Roundy's", "nova": 3, "kcal": 1820, "prot": 46.3, "carb": 61.7, "gord": 154, "fibra": 23.1, "sodio_mg": 0.772}
+{"code": "0011150989947", "nome": "Yogurt Romance Mix", "marca": "Roundy's", "nova": 4, "kcal": 1570, "prot": 30.9, "carb": 170, "gord": 84.9, "fibra": 7.78, "sodio_mg": 0.578}
+{"code": "0011150989954", "nome": "Mountain Mix", "marca": "Roundy's", "nova": 4, "kcal": 1240, "prot": 31.2, "carb": 125, "gord": 68.8, "fibra": 6.25, "sodio_mg": 0.5950000000000001}
+{"code": "0011150990424", "nome": "Blazin' Trail Mix", "marca": "Roundy's", "nova": 4, "kcal": 560, "prot": 24, "carb": 20, "gord": 48, "fibra": 8, "sodio_mg": 680.0}
+{"code": "0011150992473", "nome": "Raw Cashews", "marca": "Roundy's", "nova": 1, "kcal": 1860, "prot": 58.6, "carb": 97.7, "gord": 137, "fibra": 9.69, "sodio_mg": 0.05}
+{"code": "0011150992701", "nome": "Mountain Mix, Protein Rich Peanuts", "marca": "Roundy's", "nova": 4, "kcal": 475, "prot": 12.5, "carb": 50, "gord": 27.5, "fibra": 2.5, "sodio_mg": 238.00000000000003}
+{"code": "0011150992985", "nome": "Cashews Roasted & Salted", "marca": "Roundys", "nova": 3, "kcal": 1900, "prot": 48.8, "carb": 97.7, "gord": 146, "fibra": 9.69, "sodio_mg": 0.975}
+{"code": "0020526002760", "nome": "Roasted & Salted Cashews", "marca": "Kowalski's Markets", "nova": 3, "kcal": 1900, "prot": 48.8, "carb": 97.7, "gord": 146, "fibra": 9.69, "sodio_mg": 0.975}
+{"code": "0020526020313", "nome": "Deluxe Mixed Nuts", "marca": "Kowalski's Markets", "nova": 3, "kcal": 1790, "prot": 38.6, "carb": 61.7, "gord": 154, "fibra": 23.1, "sodio_mg": 0.772}
+{"code": "0020526042056", "nome": "Natural Super Snax", "marca": "Bergin Nut Company  Inc.", "nova": 3, "kcal": 1280, "prot": 27.7, "carb": 152, "gord": 62.3, "fibra": 6.84, "sodio_mg": 0.45}
+{"code": "0020526047013", "nome": "Cherries Jubilee Mix", "marca": "Kowalski's Markets", "nova": 4, "kcal": 1770, "prot": 25.5, "carb": 217, "gord": 89.3, "fibra": 25.4, "sodio_mg": 0.254}
+{"code": "0020526128996", "nome": "Sweet And Salty Halloween Mixer", "marca": "Bergin Nut Company  Inc.", "nova": 4, "kcal": 1360, "prot": 43.8, "carb": 100, "gord": 87.5, "fibra": 12.5, "sodio_mg": 0.75}
+{"code": "0036800328020", "nome": "Orange Juice Concentrate", "marca": "Food Club", "nova": null, "kcal": 222, "prot": 1.99, "carb": 53.6, "gord": 0, "fibra": null, "sodio_mg": 23.5}
+{"code": "0041318290769", "nome": "Premium Granola With Nuts", "marca": "Schnucks", "nova": 4, "kcal": 862, "prot": 14.9, "carb": 107, "gord": 41.6, "fibra": 8.97, "sodio_mg": 0.5339999999999999}
+{"code": "0041483001887", "nome": "100% pure juice", "marca": "Kemps", "nova": null, "kcal": 51, "prot": 0.85, "carb": 12.29, "gord": 0, "fibra": null, "sodio_mg": 0}
+{"code": "0041497079001", "nome": "No Pulp Orange Juice From Concentrate", "marca": "Weis Markets  Inc.", "nova": 1, "kcal": 50, "prot": 0.42, "carb": 12.08, "gord": 0, "fibra": 0, "sodio_mg": 0}
+{"code": "0041497079018", "nome": "Orange Juice", "marca": "Weis Markets  Inc.", "nova": 1, "kcal": 45.833333333333, "prot": 0.83333333333333, "carb": 10.833333333333, "gord": 0, "fibra": 0, "sodio_mg": 4.166666666666799}
+{"code": "0041497520626", "nome": "Weis, deluxe mixed nuts", "marca": "Weis Quality", "nova": 3, "kcal": 643, "prot": 14.29, "carb": 21.43, "gord": 57.14, "fibra": 7.1, "sodio_mg": 339.0}
+{"code": "0044100151088", "nome": "100% pure and natural juice", "marca": "Hood", "nova": null, "kcal": 50, "prot": 0, "carb": 12.5, "gord": 0, "fibra": null, "sodio_mg": 8.0}
+{"code": "0044856106370", "nome": "Marra Bros, Raw Trail Mix", "marca": "Marra Bros.", "nova": 1, "kcal": 464, "prot": 14.29, "carb": 42.86, "gord": 32.14, "fibra": 7.1, "sodio_mg": 0}
+{"code": "0048500020746", "nome": "100% Pure Orange Juice", "marca": "Tropicana", "nova": 1, "kcal": 45.8, "prot": 0.833, "carb": 10.8, "gord": 0, "fibra": null, "sodio_mg": 0}
+{"code": "0048500305690", "nome": "Pure Premium Orange Juice Calcium And Vitamin D No Pulp", "marca": "Tropicana", "nova": 1, "kcal": 46, "prot": 0.83, "carb": 10.83, "gord": 0, "fibra": 0, "sodio_mg": 0}
+{"code": "0050428476345", "nome": "Deluxe Mixed Nuts", "marca": "Gold Emblem", "nova": 3, "kcal": 633, "prot": 16.67, "carb": 20, "gord": 56.67, "fibra": 6.7, "sodio_mg": 0}
+{"code": "0070533000068", "nome": "Sunripe, Mixed Nuts", "marca": "Parimar  Inc.", "nova": 1, "kcal": 670, "prot": 14.11, "carb": 17.64, "gord": 59.96, "fibra": 17.6, "sodio_mg": 35.0}
+{"code": "0072431014277", "nome": "Cashews", "marca": "Lunds & Byerlys", "nova": 3, "kcal": 594, "prot": 15.62, "carb": 31.25, "gord": 46.88, "fibra": 3.1, "sodio_mg": 312.0}
+{"code": "0072431043512", "nome": "Natural Rocky Mountain Mix", "marca": "Lunds & Byerlys", "nova": 4, "kcal": 459, "prot": 13.51, "carb": 51.35, "gord": 27.03, "fibra": 2.7, "sodio_mg": 230.0}
+{"code": "0075450096910", "nome": "100% Orange Juice", "marca": "HyVee", "nova": null, "kcal": 50, "prot": 0.83333333333333, "carb": 12.083333333333, "gord": 0, "fibra": 0.41666666666667, "sodio_mg": 0}
+{"code": "0078742033464", "nome": "Cranberry, cashew & almond trail mix", "marca": "Great Value", "nova": 4, "kcal": 455, "prot": 9.09, "carb": 57.58, "gord": 24.24, "fibra": 6.1, "sodio_mg": 121.0}
+{"code": "0079113460162", "nome": "Golden Kernel, Roasted & Salted Deluxe Mixed Nuts", "marca": "A L Schutzman Company Inc", "nova": null, "kcal": 600, "prot": 16.67, "carb": 23.33, "gord": 56.67, "fibra": 6.7, "sodio_mg": 406.4}
+{"code": "0634356112119", "nome": "Naturalee, Raw Natural Deluxe Mixed Nuts", "marca": "D & C Distributing Co.  Inc.", "nova": 1, "kcal": 429, "prot": 25, "carb": 21.43, "gord": 50, "fibra": 10.7, "sodio_mg": 411.00000000000006}
+{"code": "0634356113918", "nome": "Roasted salted mixed nuts", "marca": "D & C Distributing Co.  Inc.", "nova": 3, "kcal": 429, "prot": 25, "carb": 21.43, "gord": 50, "fibra": 10.7, "sodio_mg": 411.00000000000006}
+{"code": "0688267168154", "nome": "Giant, mixed nuts", "marca": "Giant", "nova": 3, "kcal": 571, "prot": 21.43, "carb": 17.86, "gord": 53.57, "fibra": 7.1, "sodio_mg": 393.0}
+{"code": "0690166227269", "nome": "Mixed Nuts", "marca": "Nature's  Kitchen", "nova": 3, "kcal": 600, "prot": 20, "carb": 16.67, "gord": 53.33, "fibra": 6.7, "sodio_mg": 383.0}
+{"code": "0717544301363", "nome": "100% pure orange juice", "marca": "Super Store Industries", "nova": 1, "kcal": 46, "prot": 0, "carb": 11.25, "gord": 0, "fibra": 0, "sodio_mg": 10.0}
+{"code": "0726635121278", "nome": "Organic Raw Honey", "marca": "Y.S. Organic Bee Farms", "nova": 2, "kcal": 286, "prot": 0, "carb": 81, "gord": 0, "fibra": null, "sodio_mg": 0}
+{"code": "0731205111825", "nome": "Davis Lewis Orchards, Raw Brazil Nuts", "marca": "International Commodity Distributors  Inc.", "nova": null, "kcal": 538, "prot": 12.5, "carb": 7.5, "gord": 50, "fibra": 10, "sodio_mg": 8.128}
+{"code": "0732463247516", "nome": "HomeMaker Premium 100% Orage Juice", "marca": "Tws Marketing Group  Inc.", "nova": null, "kcal": 45.833333333333, "prot": 0.41666666666667, "carb": 10.833333333333, "gord": 0, "fibra": null, "sodio_mg": 0}
+{"code": "0737094218379", "nome": "The fresh market, no salt added supreme nut mix", "marca": "The Fresh Market", "nova": 1, "kcal": 600, "prot": 20, "carb": 23.33, "gord": 53.33, "fibra": 6.7, "sodio_mg": 0}
+{"code": "0852244006061", "nome": "100% Pure Juice", "marca": "United Dairy  Inc.", "nova": null, "kcal": 50, "prot": 0.42, "carb": 12.08, "gord": 0, "fibra": 0, "sodio_mg": 0}
+{"code": "4710090070222", "nome": "飛行日記微糖黑咖啡", "marca": "UCC", "nova": null, "kcal": 12, "prot": 0.3, "carb": 2.7, "gord": 0, "fibra": null, "sodio_mg": 7.112}
+{"code": "4901201101731", "nome": "The Blend Taste No. 113 Coffee", "marca": "UCC", "nova": 1, "kcal": 6, "prot": 0.3, "carb": 1.1, "gord": 0, "fibra": null, "sodio_mg": 1.016}
+{"code": "00604802", "nome": "Organic coconut sesame seed cluster snack", "marca": "trader Joe's", "nova": null, "kcal": 607.14285714286, "prot": 10.714285714286, "carb": 42.857142857143, "gord": 50, "fibra": 3, "sodio_mg": 232.14285714286}
+{"code": "0025000100000", "nome": "Simply Orange Pulp Free", "marca": "Simply Juices and Drinks", "nova": 1, "kcal": 45.8, "prot": 0.833, "carb": 10.8, "gord": 0, "fibra": null, "sodio_mg": null}
+{"code": "0041303014912", "nome": "Lightly salted cashews halves & pieces, lightly salted", "marca": "Essential Everyday", "nova": 3, "kcal": 571, "prot": 17.86, "carb": 28.57, "gord": 46.43, "fibra": 3.6, "sodio_mg": 196.0}
+{"code": "0077890440957", "nome": "Premium Orange Juice", "marca": "Wegmans", "nova": 1, "kcal": 45.833333333333, "prot": 0.83333333333333, "carb": 10.833333333333, "gord": 0, "fibra": 0, "sodio_mg": 0}
+{"code": "0048500202753", "nome": "Pure Premium Orange Juice Homestyle Some Pulp", "marca": "Tropicana", "nova": 1, "kcal": 110, "prot": 2, "carb": 26, "gord": 0, "fibra": null, "sodio_mg": 0}
+{"code": "7891962037134", "nome": "Bauducco Sabor Fresa", "marca": "Bauducco", "nova": 4, "kcal": 470, "prot": 4.3, "carb": 60, "gord": 24, "fibra": 1, "sodio_mg": 160.0}
+{"code": "0011150950350", "nome": "Roundy's, mardi gras mix", "marca": null, "nova": 4, "kcal": 459, "prot": 10.81, "carb": 56.76, "gord": 21.62, "fibra": 2.7, "sodio_mg": 162.0}
+{"code": "0884853800136", "nome": "Tangled tree, deluxe mixed nuts", "marca": null, "nova": 3, "kcal": 611, "prot": 16.67, "carb": 22.22, "gord": 55.56, "fibra": 8.3, "sodio_mg": 278.0}
+{"code": "0022644006385", "nome": "Coffee with cardamom", "marca": "Cafe Najjar", "nova": 1, "kcal": 25, "prot": 1, "carb": 3, "gord": 1, "fibra": null, "sodio_mg": 4.0}
+{"code": "0020526047266", "nome": "Nutty cookie dough mix", "marca": null, "nova": 4, "kcal": 571, "prot": 14.29, "carb": 35.71, "gord": 42.86, "fibra": 7.1, "sodio_mg": 125.0}
+{"code": "0011150989961", "nome": "Pak o snax", "marca": null, "nova": 4, "kcal": 432, "prot": 10.81, "carb": 56.76, "gord": 24.32, "fibra": 2.7, "sodio_mg": 162.0}
+{"code": "0071043108213", "nome": "100% Juice From Concentrate", "marca": null, "nova": 1, "kcal": 50, "prot": 0.42, "carb": 12.08, "gord": 0, "fibra": null, "sodio_mg": 0}
+{"code": "0071043108077", "nome": "Icy cold to go! 100% juice from concentrate", "marca": null, "nova": 1, "kcal": 51, "prot": 0.28, "carb": 12.43, "gord": 0, "fibra": null, "sodio_mg": 0}
+{"code": "0071043108411", "nome": "100% pasteurized orange juice from concentrate", "marca": null, "nova": null, "kcal": 50, "prot": 0.42, "carb": 12.08, "gord": 0, "fibra": 0, "sodio_mg": 0}
+{"code": "0096619785445", "nome": "Organic Raw Honey", "marca": "Kirkland Signature", "nova": 2, "kcal": 286, "prot": 0, "carb": 81, "gord": 0, "fibra": 0, "sodio_mg": 0}
+{"code": "0717544206859", "nome": "100% pure orange juice", "marca": null, "nova": null, "kcal": 42, "prot": 0.42, "carb": 10.42, "gord": 0, "fibra": 0.4, "sodio_mg": 0}
+{"code": "0717544203728", "nome": "100% pure orange juice", "marca": null, "nova": 1, "kcal": 46, "prot": 0, "carb": 11.25, "gord": 0, "fibra": 0, "sodio_mg": 10.0}
+{"code": "0717544203711", "nome": "100% pure orange juice", "marca": null, "nova": 1, "kcal": 46, "prot": 0, "carb": 11.25, "gord": 0, "fibra": null, "sodio_mg": 10.0}
+{"code": "0717544206132", "nome": "100% pure orange juice", "marca": null, "nova": null, "kcal": 42, "prot": 0.42, "carb": 10.42, "gord": 0, "fibra": 0.4, "sodio_mg": 0}
+{"code": "0717544206200", "nome": "100% pure orange juice", "marca": null, "nova": null, "kcal": 42, "prot": 0.42, "carb": 10.42, "gord": 0, "fibra": 0.4, "sodio_mg": 0}
+{"code": "0717544203735", "nome": "100% pure orange juice", "marca": null, "nova": 4, "kcal": 46, "prot": 0, "carb": 11.25, "gord": 0, "fibra": 0, "sodio_mg": 10.0}
+{"code": "0717544203704", "nome": "100% pure orange juice with more pulp", "marca": null, "nova": 1, "kcal": 46, "prot": 0, "carb": 11.25, "gord": 0, "fibra": 0, "sodio_mg": 10.0}
+{"code": "0717544206149", "nome": "100% pure orange juice", "marca": null, "nova": null, "kcal": 42, "prot": 0.42, "carb": 10.42, "gord": 0, "fibra": 0.4, "sodio_mg": 0}
+{"code": "0717544301387", "nome": "Orange juice", "marca": null, "nova": 1, "kcal": 46, "prot": 0, "carb": 11.25, "gord": 0, "fibra": 0, "sodio_mg": 10.0}
+{"code": "0717544301370", "nome": "Calcium Rich Orange Juice", "marca": null, "nova": 4, "kcal": 45.83, "prot": 0, "carb": 11.25, "gord": 0, "fibra": 0, "sodio_mg": 10.6}
+{"code": "0727915221664", "nome": "Raw mixed nuts deluxe", "marca": null, "nova": 1, "kcal": 607, "prot": 17.86, "carb": 21.43, "gord": 57.14, "fibra": 7.1, "sodio_mg": 0}
+{"code": "0894697002214", "nome": "Power fuel paleo 7 nut & seed butter", "marca": null, "nova": null, "kcal": 526, "prot": 15.79, "carb": 26.32, "gord": 47.37, "fibra": 10.5, "sodio_mg": 100.0}
+{"code": "0894697002108", "nome": "Organic Power Fuel Smooth", "marca": "NuttZo", "nova": null, "kcal": 526, "prot": 15.79, "carb": 26.32, "gord": 47.37, "fibra": 10.5, "sodio_mg": 100.0}
+{"code": "0048500018316", "nome": "Pure Premium Orange Juice Grovestand Lots Of Pulp", "marca": "Tropicana", "nova": 1, "kcal": 46, "prot": 0.83, "carb": 10.83, "gord": 0, "fibra": null, "sodio_mg": 0}
+{"code": "0036800164130", "nome": "100% orange juice from concentrate", "marca": null, "nova": 1, "kcal": 50, "prot": 0.83, "carb": 12.08, "gord": 0, "fibra": 0.4, "sodio_mg": 0}
+{"code": "0075450096996", "nome": "100% orange juice, orange", "marca": null, "nova": null, "kcal": 50, "prot": 0.83, "carb": 12.08, "gord": 0, "fibra": 0.4, "sodio_mg": 0}
+{"code": "0011150989930", "nome": "Mardi gras mix", "marca": null, "nova": 4, "kcal": 459, "prot": 10.81, "carb": 56.76, "gord": 21.62, "fibra": 2.7, "sodio_mg": 162.0}
+{"code": "0036800303201", "nome": "No pulp 100% original orange juice from concentrate, original", "marca": null, "nova": null, "kcal": 50, "prot": 0.83, "carb": 12.08, "gord": 0, "fibra": 0.4, "sodio_mg": 0}
+{"code": "0072431044038", "nome": "Mountain mix", "marca": null, "nova": 4, "kcal": 475, "prot": 12.5, "carb": 50, "gord": 27.5, "fibra": 2.5, "sodio_mg": 238.00000000000003}
+{"code": "0072431043949", "nome": "Deluxe mixed nuts", "marca": null, "nova": 3, "kcal": 611, "prot": 16.67, "carb": 22.22, "gord": 55.56, "fibra": 8.3, "sodio_mg": 264.0}
+{"code": "0894697002474", "nome": "Peanut, honey + collagen nut & seed butter chilled bold bitez bar", "marca": null, "nova": 4, "kcal": 500, "prot": 30, "carb": 27.5, "gord": 32.5, "fibra": 7.5, "sodio_mg": 262.0}
+{"code": "0041498330781", "nome": "Simply nutty premium muesli", "marca": null, "nova": 1, "kcal": 400, "prot": 11.67, "carb": 65, "gord": 11.67, "fibra": 10, "sodio_mg": 17.0}
+{"code": "0862519000113", "nome": "No bake protein bar mix", "marca": null, "nova": 4, "kcal": 675.67567567568, "prot": 32.432432432432, "carb": 29.72972972973, "gord": 29.72972972973, "fibra": 16.216216216216, "sodio_mg": 486.48648648648003}
+{"code": "0894697002481", "nome": "Almond, honey + collagen nut & seed butter chilled bold bitez bar", "marca": null, "nova": 4, "kcal": 475, "prot": 27.5, "carb": 30, "gord": 30, "fibra": 7.5, "sodio_mg": 275.0}
+{"code": "0862519000106", "nome": "Protein bar mix, whey hip chocolate chip", "marca": null, "nova": 4, "kcal": 486, "prot": 37.84, "carb": 24.32, "gord": 29.73, "fibra": 10.8, "sodio_mg": 459.0}
+{"code": "0894697002511", "nome": "Peanut, honey + collagen bold bitez nut & seed butter chilled bars", "marca": null, "nova": 4, "kcal": 500, "prot": 30, "carb": 27.5, "gord": 32.5, "fibra": 7.5, "sodio_mg": 275.0}
+{"code": "0894697002634", "nome": "Almond, maple + matcha nut & seed butter chilled bold bitez bar", "marca": null, "nova": 4, "kcal": 475, "prot": 22.5, "carb": 27.5, "gord": 30, "fibra": 5, "sodio_mg": 262.0}
+{"code": "0077890493588", "nome": "Salted mixed nuts", "marca": "Wegmans", "nova": 3, "kcal": 633.33333333333, "prot": 20, "carb": 20, "gord": 53.333333333333, "fibra": 6.6666666666667, "sodio_mg": 166.666666666672}
+{"code": "0617928000281", "nome": "Spoonable organic the original natural stevia sweetener", "marca": null, "nova": null, "kcal": 0, "prot": 0, "carb": 0, "gord": 0, "fibra": 0, "sodio_mg": 0}
+{"code": "0894697002627", "nome": "Peanut, cacao nibs + probiotics nut & seed butter chilled bold bitez bar", "marca": null, "nova": 4, "kcal": 500, "prot": 22.5, "carb": 27.5, "gord": 35, "fibra": 7.5, "sodio_mg": 275.0}
+{"code": "7891000256282", "nome": "caldo sabor panceta", "marca": "Maggi", "nova": 4, "kcal": 295, "prot": 0, "carb": 25.3, "gord": 21.1, "fibra": 0, "sodio_mg": 18500.0}
+{"code": "7802950002577", "nome": "Crema de leche", "marca": "Nestlé", "nova": 4, "kcal": 249, "prot": 2.3, "carb": 3.6, "gord": 25, "fibra": null, "sodio_mg": 46.0}
+{"code": "7790071060302", "nome": "Riera Pan tostado 100% Integral", "marca": "Riera", "nova": 4, "kcal": 277, "prot": 8.2, "carb": 53, "gord": 3.2, "fibra": null, "sodio_mg": 511.0}
+{"code": "0044100709852", "nome": "Cookies & Cream", "marca": null, "nova": 4, "kcal": 221.2389, "prot": 0.885, "carb": 32.7434, "gord": 9.7345, "fibra": null, "sodio_mg": 110.61950000000002}
+{"code": "55207874", "nome": "alcaparras en conserva", "marca": "HEMMER", "nova": 1, "kcal": 0, "prot": 0, "carb": 0, "gord": 0, "fibra": 0, "sodio_mg": 508.0}
+{"code": "0044100709838", "nome": "Coffee fudge swirl", "marca": null, "nova": 4, "kcal": 212.3894, "prot": 0.885, "carb": 32.7434, "gord": 7.9646, "fibra": 1.7699, "sodio_mg": 57.5221}
+{"code": "7891962037356", "nome": "Budín sabor Marmolado", "marca": "Bauducco", "nova": 4, "kcal": 374, "prot": 6.6, "carb": 42, "gord": 20, "fibra": 2.1, "sodio_mg": 270.0}
+{"code": "0041220713431", "nome": "Hit the Trail Mix", "marca": "HEB", "nova": 4, "kcal": 483.87096774194, "prot": 14.112903225806, "carb": 48.387096774194, "gord": 30.241935483871, "fibra": 3, "sodio_mg": 201.61290322581198}
+{"code": "7896016604805", "nome": "Ducoco Bebida de coco", "marca": "Ducoco", "nova": 4, "kcal": 33.3, "prot": 0.417, "carb": 1.25, "gord": 2.92, "fibra": 0.833, "sodio_mg": 4.17}
+{"code": "0053600110372", "nome": "Orange Juice", "marca": null, "nova": 4, "kcal": 45.833333333333, "prot": 0.83333333333333, "carb": 11.25, "gord": 0, "fibra": null, "sodio_mg": null}
+{"code": "7891000309094", "nome": "Cheerios Miel", "marca": "Nestlé", "nova": 4, "kcal": 355, "prot": 7, "carb": 75, "gord": 2.9, "fibra": 9, "sodio_mg": 344.0}
+{"code": "0070744009805", "nome": "Orange juice", "marca": "Clover Valley", "nova": 1, "kcal": 45.8, "prot": 0.833, "carb": 11.2, "gord": 0, "fibra": 0, "sodio_mg": 6.25}
+{"code": "7891000276402", "nome": "prestigio achocolatado en pó", "marca": "Nestle", "nova": 4, "kcal": 360, "prot": 5, "carb": 80, "gord": 3, "fibra": 5.5, "sodio_mg": 178.0}
+{"code": "0085239156711", "nome": "Caramel Cashew Trail Mix", "marca": "Favorite Day", "nova": 4, "kcal": 512.82051282051, "prot": 10.25641025641, "carb": 53.846153846154, "gord": 30.769230769231, "fibra": null, "sodio_mg": 141.02564102564}
+{"code": "0096619189281", "nome": "Organic Whole Brazil Nuts", "marca": "Kirkland Signature", "nova": 1, "kcal": 700, "prot": 13.3, "carb": 13.3, "gord": 66.7, "fibra": 6.67, "sodio_mg": 0}
+{"code": "5765228252826", "nome": "Gyldent rørsukker", "marca": "Urtekram", "nova": null, "kcal": 400, "prot": 0.1, "carb": 99.6, "gord": 0, "fibra": 0.1, "sodio_mg": 0}
+{"code": "7841503001308", "nome": "avena instantánea", "marca": "Mazzei", "nova": null, "kcal": 383, "prot": 18, "carb": 66.7, "gord": 3.33, "fibra": 11, "sodio_mg": 5.08}
+{"code": "7891962054490", "nome": "Cookies con gotas sabor chocolate", "marca": "Bauducco", "nova": 4, "kcal": 451, "prot": 5.7, "carb": 53, "gord": 24, "fibra": 3.7, "sodio_mg": 281.432}
+{"code": "0713733211314", "nome": "Unsalted cashews", "marca": "Meijer", "nova": 3, "kcal": 600, "prot": 16.666666666667, "carb": 30, "gord": 50, "fibra": 3.3333333333333, "sodio_mg": 0}
+{"code": "0071725800305", "nome": "Mountain trail mix", "marca": "Clover Valley", "nova": 4, "kcal": 536, "prot": 14.3, "carb": 39.3, "gord": 35.7, "fibra": 7.14, "sodio_mg": 268.0}
+{"code": "7896072902419", "nome": "Cereser Frutos Rojos", "marca": "Cereser", "nova": 4, "kcal": 52, "prot": 0, "carb": 13, "gord": 0, "fibra": null, "sodio_mg": 0}
+{"code": "7793281493014", "nome": "Nuggets Crocantes", "marca": "Union Ganadera", "nova": 4, "kcal": 192, "prot": 13.8, "carb": 15.4, "gord": 11.5, "fibra": 0, "sodio_mg": 597.0}
+{"code": "0731216105004", "nome": "Paleo bars", "marca": null, "nova": null, "kcal": 605.26315789474, "prot": 15.789473684211, "carb": 36.842105263158, "gord": 50, "fibra": 10.526315789474, "sodio_mg": 118.42105263158001}
+{"code": "9310846500703", "nome": "Go Natural Choc Salted Caramel", "marca": "Go Natural", "nova": 4, "kcal": 484, "prot": 11.5, "carb": 42.25, "gord": 29, "fibra": 5.5, "sodio_mg": 520.0}
+{"code": "7340191102750", "nome": "Peanut Flips", "marca": "XOX GEBÄCK GMBH", "nova": 4, "kcal": 491, "prot": 14, "carb": 55, "gord": 23, "fibra": null, "sodio_mg": 800.0}
+{"code": "0875754006284", "nome": "Panettone", "marca": "Bauducco", "nova": 4, "kcal": 325, "prot": 6.02, "carb": 48.2, "gord": 12, "fibra": 2.41, "sodio_mg": 163.0}
+{"code": "5949065016449", "nome": "Mega arahide coaja rosie", "marca": "Mega", "nova": null, "kcal": 616, "prot": 28.7, "carb": 4.2, "gord": 51.5, "fibra": 10.5, "sodio_mg": 552.0}
+{"code": "0788709221321", "nome": "Cashew Butter", "marca": "Ferris", "nova": null, "kcal": 575.75757575758, "prot": 18.181818181818, "carb": 30.30303030303, "gord": 48.484848484848, "fibra": 3.030303030303, "sodio_mg": 303.0303030303}
+{"code": "0819496022935", "nome": "Dried Watermelon", "marca": null, "nova": null, "kcal": 357.14285714286, "prot": 3.5714285714286, "carb": 92.857142857143, "gord": 0, "fibra": 3.5714285714286, "sodio_mg": 232.14285714286}
+{"code": "0099482486402", "nome": "Dry roasted baru nuts", "marca": "Whole Foods Market", "nova": null, "kcal": 467, "prot": 20, "carb": 40, "gord": 33.3, "fibra": 16.7, "sodio_mg": 0}
+{"code": "0855291001911", "nome": "Almond Cashews & Raisins", "marca": "Raylicious", "nova": null, "kcal": 515.15151515152, "prot": 18.181818181818, "carb": 24.242424242424, "gord": 42.424424242424, "fibra": 9.0909090909091, "sodio_mg": 484.84848484848}
+{"code": "7613287290380", "nome": "Nescafé Tradición", "marca": "Nescafé", "nova": 1, "kcal": 261, "prot": 16.4, "carb": 48.5, "gord": 0.2, "fibra": 0, "sodio_mg": 90.0}
+{"code": "8697447040519", "nome": "Kafeinsiz Türk Kahvesi", "marca": "Kahve Dünyası", "nova": null, "kcal": 321, "prot": 11.3, "carb": 15.3, "gord": 11.4, "fibra": 56.3, "sodio_mg": 0}
+{"code": "9369998331321", "nome": "Future Burger", "marca": "Future Farm", "nova": 4, "kcal": 193, "prot": 14, "carb": 7.9, "gord": 12, "fibra": null, "sodio_mg": 221.73999999999998}
+{"code": "7896336000295", "nome": "Amendoim Japonês", "marca": "Santa Helena", "nova": 4, "kcal": 483, "prot": 16.7, "carb": 43.3, "gord": 30, "fibra": 6.67, "sodio_mg": 960.0}
+{"code": "0646670316784", "nome": "Organic Lime Juice", "marca": "Sprouts", "nova": 1, "kcal": 0, "prot": 0, "carb": 0, "gord": 0, "fibra": null, "sodio_mg": 0}
+{"code": "7891331015428", "nome": "Nutribom Miel & blé", "marca": "Nutrimental", "nova": 4, "kcal": 350, "prot": 10, "carb": 75, "gord": 0.8, "fibra": 0.9, "sodio_mg": 160.0}
+{"code": "7894000010038", "nome": "Maizena", "marca": "Duryea", "nova": 2, "kcal": 350, "prot": 0, "carb": 85, "gord": 0, "fibra": 0, "sodio_mg": 0}
+{"code": "0725439202459", "nome": "Roasted Cashews", "marca": null, "nova": 3, "kcal": 562.5, "prot": 15.625, "carb": 28.125, "gord": 46.875, "fibra": 3.125, "sodio_mg": 390.625}
+{"code": "0034952577365", "nome": "Sportsman’s mix", "marca": null, "nova": 4, "kcal": 606.06060606061, "prot": 18.181818181818, "carb": 27.272727272727, "gord": 45.454545454545, "fibra": 6.0606060606061, "sodio_mg": 545.4545454545599}
+{"code": "7896072901849", "nome": "Manzana", "marca": "Cereser", "nova": 4, "kcal": 52, "prot": 0, "carb": 13, "gord": 0, "fibra": null, "sodio_mg": 0}
+{"code": "0850022388064", "nome": "Organic Raw Cacao Powder", "marca": "Botanica Origins", "nova": null, "kcal": 16, "prot": 1, "carb": 3, "gord": 0.9, "fibra": 2, "sodio_mg": 0.7}
+{"code": "4770082323064", "nome": "Peanut cream", "marca": "Alvo", "nova": 1, "kcal": 637, "prot": 27, "carb": 9.3, "gord": 53, "fibra": 7.6, "sodio_mg": 0}
+{"code": "4904910024995", "nome": "Black", "marca": "DyDo", "nova": 4, "kcal": 0, "prot": 0, "carb": 1, "gord": 0, "fibra": null, "sodio_mg": 20.0}
+{"code": "4902102151801", "nome": "The Zero", "marca": "Georgia", "nova": 4, "kcal": 12, "prot": 0.3, "carb": 1.6, "gord": 0.8, "fibra": 1.2, "sodio_mg": 40.0}
+{"code": "4909411083304", "nome": "FIRE BLACK", "marca": "KIRIN COFFEE", "nova": 4, "kcal": 0, "prot": 0, "carb": 0.5, "gord": 0, "fibra": null, "sodio_mg": 16.0}
+{"code": "4902102150507", "nome": "PREMIUM BLACK", "marca": "Costa Coffee", "nova": 4, "kcal": 0, "prot": 0, "carb": 0.8, "gord": 0, "fibra": null, "sodio_mg": 24.0}
+{"code": "7790580133863", "nome": "tubitos extreme", "marca": "arcor-mogul", "nova": 4, "kcal": 357, "prot": 1.9, "carb": 84, "gord": 1.9, "fibra": 0, "sodio_mg": 22000}
+{"code": "7771258140628", "nome": "Choclo en Granos", "marca": "ebia", "nova": 1, "kcal": 56.9, "prot": 2.38, "carb": 8.46, "gord": 1.46, "fibra": 2.77, "sodio_mg": 9.23}
+{"code": "4902074015514", "nome": "The Black", "marca": "Blues Coffee", "nova": 1, "kcal": 3, "prot": 0.2, "carb": 0.3, "gord": 0.1, "fibra": null, "sodio_mg": 20.0}
+{"code": "4514603437614", "nome": "SHOT & SHOT REAL BLUE", "marca": "WONDA", "nova": null, "kcal": 15, "prot": 0.8, "carb": 2.4, "gord": 0.2, "fibra": null, "sodio_mg": 40.0}
+{"code": "7891167831179", "nome": "Lomos de Atún Claro", "marca": "Gomes da costa", "nova": 3, "kcal": 135, "prot": 25, "carb": 0, "gord": 4.17, "fibra": 0, "sodio_mg": 305.0}
+{"code": "7898959855436", "nome": "apple cider vinegar", "marca": "Fazenda Sāo Roque", "nova": 2, "kcal": 10, "prot": 0, "carb": 2.5, "gord": 0, "fibra": 0, "sodio_mg": null}
+{"code": "4311501688144", "nome": "Kilishi", "marca": "springfoods", "nova": null, "kcal": 300, "prot": 1, "carb": 4, "gord": 10, "fibra": 1, "sodio_mg": 500.0}
+{"code": "2800004817325", "nome": "Jardinera", "marca": "Ciudad del Lago", "nova": 3, "kcal": 56.9, "prot": 3.85, "carb": 8.46, "gord": 0.769, "fibra": 3.62, "sodio_mg": 502.0}
+{"code": "7891143018389", "nome": "Sandwich-in sabor danbo", "marca": "Adler", "nova": 4, "kcal": 253, "prot": 13.7, "carb": 6.67, "gord": 19, "fibra": 0, "sodio_mg": 1230.0}
+{"code": "7340191129214", "nome": "vingummi bamser", "marca": "coop 365 økologi", "nova": 4, "kcal": 328, "prot": 5.9, "carb": 76, "gord": 0, "fibra": null, "sodio_mg": 0}
+{"code": "4811028004965", "nome": "арахис сырой", "marca": "Белый пеликан", "nova": 1, "kcal": 594.5, "prot": 25.7, "carb": 19.2, "gord": 46.1, "fibra": null, "sodio_mg": null}
+{"code": "4904910101153", "nome": "Black", "marca": "DyDo", "nova": 1, "kcal": 0, "prot": 0, "carb": 1, "gord": 0, "fibra": null, "sodio_mg": 200.0}
+{"code": "00000022", "nome": "Farandole de madeleine", "marca": "Coca-Cola", "nova": 4, "kcal": 389, "prot": 37, "carb": 35.2, "gord": 16.7, "fibra": 18.5, "sodio_mg": 352.0}
+{"code": "0007203663052", "nome": "100% pure juice from concentrate", "marca": null, "nova": null, "kcal": 46, "prot": 0.83, "carb": 10.83, "gord": 0, "fibra": 0.4, "sodio_mg": 4.0}
+{"code": "07771865", "nome": "Barras sabor Chocolate y Amendoim", "marca": "EasySlim", "nova": null, "kcal": 361, "prot": 36, "carb": 28, "gord": 12, "fibra": 9, "sodio_mg": null}
+{"code": "7892840819514", "nome": "Toddy Original", "marca": "Toddy", "nova": null, "kcal": 380, "prot": 0, "carb": 90, "gord": 0, "fibra": null, "sodio_mg": 125.0}
+{"code": "7340191129221", "nome": "Änglamark Fruktgummi 100g", "marca": "ANDROS SNC", "nova": 4, "kcal": 328, "prot": 0, "carb": 81, "gord": 0, "fibra": 0, "sodio_mg": null}
+{"code": "4901777420076", "nome": "Black", "marca": "Starbucks", "nova": 4, "kcal": 0, "prot": 0, "carb": 0.6, "gord": 0, "fibra": null, "sodio_mg": 20.0}
+{"code": "7790040144903", "nome": "Cofler Relleno", "marca": "Arcor", "nova": 4, "kcal": 356, "prot": 4.4, "carb": 50, "gord": 15, "fibra": 1.6, "sodio_mg": 61.0}
+{"code": "7896072692334", "nome": "Cobertura Premium sabor Chocolate Meio Amarga", "marca": "Mavalério", "nova": 4, "kcal": 560, "prot": 4, "carb": 60, "gord": 32, "fibra": 4, "sodio_mg": 40.0}
+{"code": "7340191130814", "nome": "Luomu mangosose", "marca": "rainbow", "nova": null, "kcal": 67.8, "prot": 0.444, "carb": 15.6, "gord": 0, "fibra": 16.7, "sodio_mg": 0}
+{"code": "7895099442199", "nome": "Acai Original with Guarana", "marca": "Vibe Acai", "nova": 4, "kcal": 103, "prot": 0, "carb": 18.1, "gord": 3.12, "fibra": 1.88, "sodio_mg": 13.100000000000001}
+{"code": "7898994718703", "nome": "Snack Pork", "marca": "FIT", "nova": null, "kcal": 427, "prot": 77, "carb": 4.5, "gord": 12, "fibra": null, "sodio_mg": 1891000}
+{"code": "7896035941059", "nome": "Fécula de Mandioca", "marca": "Lifama", "nova": 3, "kcal": 360, "prot": 0, "carb": 90, "gord": 0, "fibra": 0, "sodio_mg": 0}
+{"code": "0020526052024", "nome": "Dark Chocolate Cashews, Dark Chocolate", "marca": "Bergin fruit and nut company", "nova": 4, "kcal": 556, "prot": 8.33, "carb": 50, "gord": 36.1, "fibra": 5.61, "sodio_mg": 0}
+{"code": "7896035950389", "nome": "Amido de Milho", "marca": "Amafil", "nova": 2, "kcal": 344, "prot": 0, "carb": 86, "gord": 0, "fibra": 3.8, "sodio_mg": 0}
+{"code": "7773435850016", "nome": "Crema Repostera", "marca": "Dagusto", "nova": 4, "kcal": 295, "prot": 0, "carb": 13.5, "gord": 22.5, "fibra": 0, "sodio_mg": 85.0}
+{"code": "4711175001513", "nome": "Organic Chilli Sauce", "marca": "SauceCo", "nova": 3, "kcal": 112, "prot": 4.5, "carb": 16, "gord": 3.5, "fibra": null, "sodio_mg": 4380.0}
+{"code": "7891330020010", "nome": "Neugebauer preto e branco", "marca": "Neugebauer Co.", "nova": 4, "kcal": 553, "prot": 5.64, "carb": 60.2, "gord": 31.6, "fibra": 2.26, "sodio_mg": 56.4}
+{"code": "0631430056512", "nome": "Coconut Water", "marca": "Dikoko", "nova": 1, "kcal": 14.6, "prot": 0, "carb": 3.75, "gord": 0, "fibra": 0, "sodio_mg": 2.0799999999999996}
+{"code": "6132553380064", "nome": "Yippee", "marca": "Wamagro", "nova": 3, "kcal": 622, "prot": 25, "carb": 13.5, "gord": 50.3, "fibra": null, "sodio_mg": 400.0}
+{"code": "6132553380071", "nome": "Yippee extra smooth Wamagro", "marca": "Wamagro", "nova": null, "kcal": 622, "prot": 25, "carb": 13.5, "gord": 50.3, "fibra": null, "sodio_mg": 0.4}
+{"code": "7771260500014", "nome": "Milho verde", "marca": "Deymas", "nova": 3, "kcal": 81.5, "prot": 2.92, "carb": 14.6, "gord": 1.23, "fibra": 2.92, "sodio_mg": 297.0}
+{"code": "2900010997476", "nome": "Кофе в дрип-пакете #2", "marca": "Coffee Drip", "nova": null, "kcal": 303.2, "prot": 13.9, "carb": 29.5, "gord": 14.4, "fibra": null, "sodio_mg": null}
+{"code": "0630941062913", "nome": "Choclo Dulce en Grano", "marca": "Doña Corina", "nova": 3, "kcal": 85.4, "prot": 3, "carb": 13.8, "gord": 1.23, "fibra": 3, "sodio_mg": 200.0}
+{"code": "4901085659526", "nome": "TULLY’S COFFEE ESPRESSO BASE 无糖", "marca": "Tully’s Coffee", "nova": 1, "kcal": 17, "prot": 0, "carb": 3.5, "gord": 0, "fibra": null, "sodio_mg": 52.0}
+{"code": "7891152802191", "nome": "Maizena", "marca": "Richester", "nova": 4, "kcal": 440, "prot": 6.33, "carb": 76.7, "gord": 12, "fibra": 2, "sodio_mg": 293.0}
+{"code": "4901777349926", "nome": "Craft Boss微糖500ml塑料瓶装", "marca": "Suntory", "nova": 4, "kcal": 19, "prot": 0.75, "carb": 3.1, "gord": 0.75, "fibra": null, "sodio_mg": 60.0}
