@@ -7,6 +7,7 @@ import { PacientesModule } from '../pacientes/pacientes.module';
 
 /**
  * Documentos PDF: atestado, recibo, documento livre e plano alimentar timbrado.
+ * O timbre de todos vem do ProfissionalService (conta logada).
  * PrismaModule é @Global no app.module.
  */
 @Module({
