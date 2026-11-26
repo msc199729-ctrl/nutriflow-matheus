@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { DocumentosController } from './documentos.controller';
 import { DocumentosService } from './documentos.service';
 import { PlanoPdfService } from './plano-pdf.service';
+import { ProfissionalService } from './profissional.service';
 import { PacientesModule } from '../pacientes/pacientes.module';
 
 /**
@@ -11,7 +12,7 @@ import { PacientesModule } from '../pacientes/pacientes.module';
 @Module({
   imports: [PacientesModule],
   controllers: [DocumentosController],
-  providers: [DocumentosService, PlanoPdfService],
-  exports: [PlanoPdfService],
+  providers: [DocumentosService, PlanoPdfService, ProfissionalService],
+  exports: [PlanoPdfService, ProfissionalService],
 })
 export class DocumentosModule {}
