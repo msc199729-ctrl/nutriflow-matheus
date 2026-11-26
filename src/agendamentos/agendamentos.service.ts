@@ -165,6 +165,7 @@ export class AgendamentosService {
     idPaciente: number;
     inicio: Date;
     observacao: string | null;
+    status: string;
     criadoEm: Date;
     atualizadoEm: Date;
     paciente: {
@@ -178,6 +179,7 @@ export class AgendamentosService {
       idPaciente: row.idPaciente,
       inicio: row.inicio.toISOString(),
       observacao: row.observacao,
+      status: row.status,
       criadoEm: row.criadoEm.toISOString(),
       atualizadoEm: row.atualizadoEm.toISOString(),
       paciente: {
@@ -241,6 +243,7 @@ export class AgendamentosService {
     const data: {
       inicio?: Date;
       observacao?: string | null;
+      status?: 'agendada' | 'realizada' | 'faltou' | 'cancelada';
     } = {};
     if (dto.inicio !== undefined) {
       const d = parseIsoInstantOrThrow(dto.inicio);
@@ -248,6 +251,9 @@ export class AgendamentosService {
     }
     if (dto.observacao !== undefined) {
       data.observacao = dto.observacao?.trim() || null;
+    }
+    if (dto.status !== undefined) {
+      data.status = dto.status;
     }
     const row = await this.prisma.consultaAgendada.update({
       where: { id },
