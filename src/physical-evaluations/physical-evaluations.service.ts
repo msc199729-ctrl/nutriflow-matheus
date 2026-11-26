@@ -227,6 +227,237 @@ export class PhysicalEvaluationsService {
     throw new ForbiddenException('Acesso negado');
   }
 
+  /**
+   * Série histórica de evolução, a partir das avaliações físicas.
+   *
+   * É o eixo que o nutricionista usa em consulta de retorno: o que ele mesmo
+   * mediu, na ordem do tempo. Antes a aba Evolução só mostrava RegistroDiario
+   * (o que o paciente digita no app), então em atendimento presencial ela
+   * aparecia vazia.
+   *
+   * Só devolve as métricas que têm valor em pelo menos duas avaliações —
+   * série cheia de nulls não vira gráfico.
+   */
+  async serieEvolucao(idPaciente: number, user: JwtPayloadUser) {
+    await this.ensurePacienteAccess(idPaciente, user);
+
+    const avaliacoes = await this.prisma.avaliacaoFisica.findMany({
+      where: { idPaciente },
+      orderBy: { data: 'asc' },
+      select: {
+        id: true,
+        data: true,
+        peso: true,
+        altura: true,
+        imc: true,
+        classificacaoImc: true,
+        percentualGordura: true,
+        massaGorduraKg: true,
+        massaLivreGorduraKg: true,
+        massaMuscularKg: true,
+        somatorioDobrasMm: true,
+        circCintura: true,
+        circAbdomen: true,
+        circQuadril: true,
+        circBracoDirContraido: true,
+        circBracoEsqContraido: true,
+        circCoxaProximalDir: true,
+        circPanturrilhaDir: true,
+        rcq: true,
+        biaPercentualGordura: true,
+        biaMassaMuscularKg: true,
+        urlFotoFrente: true,
+        urlFotoCostas: true,
+        urlFotoLado: true,
+      },
+    });
+
+    if (avaliacoes.length === 0) {
+      return {
+        pacienteId: idPaciente,
+        pontos: [],
+        metricas: [],
+        variacoes: [],
+        primeira: null,
+        ultima: null,
+      };
+    }
+
+    type Avaliacao = (typeof avaliacoes)[number];
+
+    /** Métrica exibível: rótulo, unidade e como extrair o valor da avaliação. */
+    const METRICAS: Array<{
+      chave: string;
+      rotulo: string;
+      unidade: string;
+      grupo: 'composicao' | 'circunferencia' | 'dobras';
+      extrair: (a: Avaliacao) => number | null;
+      /** Só vale como evolução se menor for melhor (gordura, cintura). */
+      menorEhMelhor?: boolean;
+    }> = [
+      { chave: 'peso', rotulo: 'Peso', unidade: 'kg', grupo: 'composicao', extrair: (a) => a.peso },
+      { chave: 'imc', rotulo: 'IMC', unidade: 'kg/m²', grupo: 'composicao', extrair: (a) => a.imc },
+      {
+        chave: 'percentualGordura',
+        rotulo: '% de gordura',
+        unidade: '%',
+        grupo: 'composicao',
+        extrair: (a) => a.percentualGordura,
+        menorEhMelhor: true,
+      },
+      {
+        chave: 'massaGorduraKg',
+        rotulo: 'Massa de gordura',
+        unidade: 'kg',
+        grupo: 'composicao',
+        extrair: (a) => a.massaGorduraKg,
+        menorEhMelhor: true,
+      },
+      {
+        chave: 'massaMuscularKg',
+        rotulo: 'Massa muscular',
+        unidade: 'kg',
+        grupo: 'composicao',
+        extrair: (a) => a.massaMuscularKg,
+      },
+      {
+        chave: 'massaLivreGorduraKg',
+        rotulo: 'Massa livre de gordura',
+        unidade: 'kg',
+        grupo: 'composicao',
+        extrair: (a) => a.massaLivreGorduraKg,
+      },
+      {
+        chave: 'biaPercentualGordura',
+        rotulo: '% gordura (bioimpedância)',
+        unidade: '%',
+        grupo: 'composicao',
+        extrair: (a) => a.biaPercentualGordura,
+        menorEhMelhor: true,
+      },
+      {
+        chave: 'circCintura',
+        rotulo: 'Cintura',
+        unidade: 'cm',
+        grupo: 'circunferencia',
+        extrair: (a) => a.circCintura,
+        menorEhMelhor: true,
+      },
+      {
+        chave: 'circAbdomen',
+        rotulo: 'Abdômen',
+        unidade: 'cm',
+        grupo: 'circunferencia',
+        extrair: (a) => a.circAbdomen,
+        menorEhMelhor: true,
+      },
+      {
+        chave: 'circQuadril',
+        rotulo: 'Quadril',
+        unidade: 'cm',
+        grupo: 'circunferencia',
+        extrair: (a) => a.circQuadril,
+      },
+      {
+        chave: 'circBracoDirContraido',
+        rotulo: 'Braço dir. contraído',
+        unidade: 'cm',
+        grupo: 'circunferencia',
+        extrair: (a) => a.circBracoDirContraido,
+      },
+      {
+        chave: 'circCoxaProximalDir',
+        rotulo: 'Coxa dir. proximal',
+        unidade: 'cm',
+        grupo: 'circunferencia',
+        extrair: (a) => a.circCoxaProximalDir,
+      },
+      {
+        chave: 'rcq',
+        rotulo: 'Relação cintura/quadril',
+        unidade: '',
+        grupo: 'circunferencia',
+        extrair: (a) => a.rcq,
+        menorEhMelhor: true,
+      },
+      {
+        chave: 'somatorioDobrasMm',
+        rotulo: 'Somatório de dobras',
+        unidade: 'mm',
+        grupo: 'dobras',
+        extrair: (a) => a.somatorioDobrasMm,
+        menorEhMelhor: true,
+      },
+    ];
+
+    const metricas = METRICAS.map((m) => {
+      const serie = avaliacoes
+        .map((a) => ({
+          data: a.data.toISOString().slice(0, 10),
+          valor: m.extrair(a),
+        }))
+        .filter((p): p is { data: string; valor: number } => p.valor != null);
+      return { ...m, serie, pontos: serie.length };
+    })
+      // Uma métrica só entra se tiver valor em 2+ avaliações.
+      .filter((m) => m.pontos >= 2)
+      .map(({ extrair: _extrair, ...resto }) => resto);
+
+    const primeira = avaliacoes[0];
+    const ultima = avaliacoes[avaliacoes.length - 1];
+
+    const variacoes = metricas
+      .map((m) => {
+        const inicial = m.serie[0].valor;
+        const final = m.serie[m.serie.length - 1].valor;
+        const delta = final - inicial;
+        const pct = inicial !== 0 ? (delta / inicial) * 100 : null;
+        return {
+          chave: m.chave,
+          rotulo: m.rotulo,
+          unidade: m.unidade,
+          grupo: m.grupo,
+          inicial,
+          final,
+          delta: Math.round(delta * 100) / 100,
+          percentual: pct != null ? Math.round(pct * 10) / 10 : null,
+          /** true = o movimento foi na direção desejada. */
+          favoravel: m.menorEhMelhor ? delta < 0 : delta > 0,
+          semMudanca: delta === 0,
+        };
+      })
+      .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
+
+    return {
+      pacienteId: idPaciente,
+      pontos: avaliacoes.map((a) => ({
+        id: a.id,
+        data: a.data.toISOString().slice(0, 10),
+        peso: a.peso,
+        percentualGordura: a.percentualGordura,
+        massaMuscularKg: a.massaMuscularKg,
+        circCintura: a.circCintura,
+        imc: a.imc,
+        classificacaoImc: a.classificacaoImc,
+        fotos: {
+          frente: a.urlFotoFrente,
+          costas: a.urlFotoCostas,
+          lado: a.urlFotoLado,
+        },
+      })),
+      metricas,
+      variacoes,
+      primeira: {
+        data: primeira.data.toISOString().slice(0, 10),
+        peso: primeira.peso,
+      },
+      ultima: {
+        data: ultima.data.toISOString().slice(0, 10),
+        peso: ultima.peso,
+      },
+    };
+  }
+
   async findOne(id: number, user: JwtPayloadUser) {
     await this.ensureAvaliacaoAccess(id, user);
     const av = await this.prisma.avaliacaoFisica.findUnique({
