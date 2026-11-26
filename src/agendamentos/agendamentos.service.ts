@@ -1,10 +1,11 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { PerfilUsuario } from '@prisma/client';
+import { PerfilUsuario, StatusConsulta } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import type { JwtPayloadUser } from '../common/decorators/current-user.decorator';
 import {
@@ -190,6 +191,46 @@ export class AgendamentosService {
     };
   }
 
+  /**
+   * Impede dois agendamentos no mesmo horário.
+   *
+   * Duas colisões reais: o profissional em dois lugares ao mesmo tempo, e o
+   * mesmo paciente marcado duas vezes. Ambas passavam batido antes e viravam
+   * problema na recepção, não no sistema.
+   */
+  private async ensureSemConflito(
+    inicio: Date,
+    idNutricionista: number,
+    idPaciente: number,
+    ignorarId?: number,
+  ): Promise<void> {
+    const existentes = await this.prisma.consultaAgendada.findMany({
+      where: {
+        inicio,
+        status: { not: StatusConsulta.cancelada },
+        ...(ignorarId != null ? { id: { not: ignorarId } } : {}),
+        OR: [{ idNutricionista }, { idPaciente }],
+      },
+      select: { id: true, idNutricionista: true, idPaciente: true },
+    });
+
+    const doProfissional = existentes.find(
+      (e) => e.idNutricionista === idNutricionista,
+    );
+    if (doProfissional) {
+      throw new ConflictException(
+        'Já existe uma consulta neste horário para você.',
+      );
+    }
+
+    const doPaciente = existentes.find((e) => e.idPaciente === idPaciente);
+    if (doPaciente) {
+      throw new ConflictException(
+        'Este paciente já tem consulta neste horário.',
+      );
+    }
+  }
+
   async findAll(user: JwtPayloadUser, query: QueryAgendamentosDto) {
     this.ensurePodeLerAgendamentos(user);
     const fb = defaultRange();
@@ -223,6 +264,7 @@ export class AgendamentosService {
       user,
     );
     const inicio = parseIsoInstantOrThrow(dto.inicio);
+    await this.ensureSemConflito(inicio, paciente.idNutricionista, paciente.id);
     const row = await this.prisma.consultaAgendada.create({
       data: {
         idPaciente: paciente.id,
@@ -239,7 +281,7 @@ export class AgendamentosService {
 
   async update(id: number, dto: UpdateAgendamentoDto, user: JwtPayloadUser) {
     this.ensureProfissional(user);
-    await this.findAgendamentoOrThrow(id, user);
+    const atual = await this.findAgendamentoOrThrow(id, user);
     const data: {
       inicio?: Date;
       observacao?: string | null;
@@ -247,6 +289,17 @@ export class AgendamentosService {
     } = {};
     if (dto.inicio !== undefined) {
       const d = parseIsoInstantOrThrow(dto.inicio);
+      // Reagendar também precisa checar colisão — é justamente quando ela
+      // costuma acontecer.
+      const mesmoHorario = d.getTime() === atual.inicio.getTime();
+      if (!mesmoHorario) {
+        await this.ensureSemConflito(
+          d,
+          atual.idNutricionista,
+          atual.idPaciente,
+          id,
+        );
+      }
       data.inicio = d;
     }
     if (dto.observacao !== undefined) {

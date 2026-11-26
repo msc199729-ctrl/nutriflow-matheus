@@ -53,8 +53,28 @@ export class PacientesService {
     user: JwtPayloadUser,
     page: number = 1,
     limit: number = 10,
+    busca?: string,
   ) {
-    const where = wherePacientesParaProfissional(user);
+    const whereBase = wherePacientesParaProfissional(user);
+
+    // Busca livre por nome, e-mail ou celular. Sem isso, um seletor de paciente
+    // só alcança o que cabe na primeira página — e passa a existir paciente
+    // impossível de agendar.
+    const termo = busca?.trim();
+    const where = termo
+      ? {
+          ...whereBase,
+          OR: [
+            { nome: { contains: termo, mode: 'insensitive' as const } },
+            {
+              usuario: {
+                email: { contains: termo, mode: 'insensitive' as const },
+              },
+            },
+            { celular: { contains: termo } },
+          ],
+        }
+      : whereBase;
     const skip = (page - 1) * limit;
     const [data, total, totalEnvios, enviosRespondidos] = await Promise.all([
       this.prisma.paciente.findMany({
@@ -70,12 +90,12 @@ export class PacientesService {
       this.prisma.paciente.count({ where }),
       this.prisma.envioFormulario.groupBy({
         by: ['idPaciente'],
-        where: { paciente: where },
+        where: { paciente: whereBase },
         _count: { id: true },
       }),
       this.prisma.envioFormulario.groupBy({
         by: ['idPaciente'],
-        where: { paciente: { ...where }, respondidoEm: { not: null } },
+        where: { paciente: { ...whereBase }, respondidoEm: { not: null } },
         _count: { id: true },
       }),
     ]);
