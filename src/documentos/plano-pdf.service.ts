@@ -7,32 +7,35 @@
  * Estrutura (inspirada no que o WebDiet faz bem, com o que ele faz mal resolvido):
  *
  *  1. RESUMO — calorias e macros do dia em 4 caixas + "Como usar este plano"
- *     (o WebDiet não explica nada; o paciente fica sem saber o que é substituto)
  *     + timeline das refeições com kcal e macros de cada uma
  *     + hidratação com equivalência em copos.
  *
  *  2. PLANEJAMENTO — uma seção por refeição: faixa de título com horário,
  *     itens com medida caseira à direita, substitutos indentados com "ou"
- *     (no WebDiet eles aparecem como lista solta abaixo, parecendo item extra),
  *     e rodapé com os macros da refeição.
  *
  *  3. MICRONUTRIENTES — grade de cards com valor, barra e % da DRI do paciente,
- *     com legenda de cores ANTES da grade (no WebDiet são 25 números sem
- *     referência nenhuma — o paciente não sabe se 1144 mg de cálcio é bom).
+ *     com legenda de cores ANTES da grade.
  *
  *  4. LISTA DE COMPRAS — agrupada por categoria, com checkbox, quantidade
  *     total do período e alternativas marcadas com "ou".
+ *
+ * O TIMBRE vem da conta logada (ProfissionalService): nome, titulação,
+ * conselho, cidade, logo e Instagram são de quem emite, não do código.
  *
  * Compliance CFN (Res. 599/2018 e 856/2026): é a prescrição, não material de
  * divulgação — sem promessa de resultado, sem antes/depois.
  */
 
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import PDFDocument from 'pdfkit';
+import { TipoPlano } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { PROFISSIONAL_PADRAO } from './documentos.config';
 import type { JwtPayloadUser } from '../common/decorators/current-user.decorator';
 import { PacientesService } from '../pacientes/pacientes.service';
+import { idadeEmAnos } from '../physical-evaluations/physical-evaluations-calc.service';
 import {
   agregarNutrientes,
   NUTRIENTES,
@@ -40,14 +43,15 @@ import {
   type ContextoDri,
   type ItemPlano,
 } from '../micronutrientes/micronutrientes';
+import { ProfissionalService, type PerfilProfissional } from './profissional.service';
 
 // ── Geometria ────────────────────────────────────────────────────────
 const W = 595.28;
 const H = 841.89;
 const ME = 48;
 const MD = 48;
-const MSUP = 132;      // abaixo da faixa de topo (1ª página)
-const MSUP_CONT = 96;  // páginas seguintes
+const MSUP = 132;
+const MSUP_CONT = 96;
 const MINF = 62;
 const UTIL = W - ME - MD;
 
@@ -73,13 +77,23 @@ function dataExtenso(d: Date): string {
   return `${d.getDate()} de ${MESES[d.getMonth()]} de ${d.getFullYear()}`;
 }
 
+/**
+ * Colunas `@db.Date` e `@db.Time` chegam do driver como meia-noite UTC.
+ * Ler com a API local desloca o valor em fusos negativos — um plano "24/11"
+ * viraria "23/11" e "08:00" viraria "05:00". Por isso estas leem em UTC.
+ */
 function dataCurta(d: Date | null): string {
-  return d ? d.toLocaleDateString('pt-BR') : '';
+  if (!d) return '';
+  const dia = String(d.getUTCDate()).padStart(2, '0');
+  const mes = String(d.getUTCMonth() + 1).padStart(2, '0');
+  return `${dia}/${mes}/${d.getUTCFullYear()}`;
 }
 
 function horaDe(h: Date | null): string {
   if (!h) return '';
-  return h.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  const hh = String(h.getUTCHours()).padStart(2, '0');
+  const mm = String(h.getUTCMinutes()).padStart(2, '0');
+  return `${hh}:${mm}`;
 }
 
 function n1(v: number | null | undefined): number {
@@ -124,6 +138,7 @@ interface CompraGrupo {
 }
 
 interface DadosPdf {
+  profissional: PerfilProfissional;
   paciente: string;
   nomePlano: string;
   tipoPlano: string;
@@ -133,7 +148,6 @@ interface DadosPdf {
   totais: { kcal: number; ptn: number; cho: number; lip: number };
   micros: Array<{ rotulo: string; valor: string; percentual: number }>;
   compras: CompraGrupo[];
-  /** true quando algum alimento do plano não tem micronutrientes */
   microsIncompletos: boolean;
 }
 
@@ -194,11 +208,14 @@ export class PlanoPdfService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly pacientesService: PacientesService,
+    private readonly profissionalService: ProfissionalService,
   ) {}
 
   // ═══════════════════ DADOS ═══════════════════
 
-  async carregar(idPlano: number, user: JwtPayloadUser): Promise<DadosPdf> {
+  async carregarPlano(idPlano: number, user: JwtPayloadUser): Promise<DadosPdf> {
+    const profissional = await this.profissionalService.doUsuario(user);
+
     const plano = await this.prisma.planoAlimentar.findUnique({
       where: { id: idPlano },
       select: {
@@ -360,7 +377,8 @@ export class PlanoPdfService {
     // ── Micronutrientes contra a DRI do paciente ──
     const ctx: ContextoDri = {
       sexo: String(plano.paciente.genero ?? '').toUpperCase().startsWith('F') ? 'F' : 'M',
-      idadeAnos: idadeEmAnos(plano.paciente.dataNascimento),
+      // Sem data de nascimento, assume adulto (30) para não perder a referência.
+      idadeAnos: idadeEmAnos(plano.paciente.dataNascimento) ?? 30,
     };
     const resultadoMicro = agregarNutrientes(itensMicro, alimentosMicro, ctx);
     const micros = resultadoMicro.totais.map((t) => ({
@@ -394,9 +412,10 @@ export class PlanoPdfService {
         : '';
 
     return {
+      profissional,
       paciente: plano.paciente.nome?.trim() || 'Paciente',
       nomePlano: plano.nome ?? `Plano alimentar #${plano.id}`,
-      tipoPlano: plano.tipoPlano === 'QUALITATIVO' ? 'Qualitativo' : 'Por alimentos',
+      tipoPlano: plano.tipoPlano === TipoPlano.QUALITATIVO ? 'Qualitativo' : 'Por alimentos',
       vigencia,
       metaAgua: n1(plano.metaAguaLitros),
       refeicoes,
@@ -410,7 +429,7 @@ export class PlanoPdfService {
   // ═══════════════════ RENDER ═══════════════════
 
   gerar(d: DadosPdf): PDFKit.PDFDocument {
-    const prof = PROFISSIONAL_PADRAO;
+    const prof = d.profissional;
     const doc = new PDFDocument({
       size: 'A4',
       margins: { top: MSUP, bottom: MINF, left: ME, right: MD },
@@ -418,7 +437,16 @@ export class PlanoPdfService {
       info: { Title: `Plano alimentar — ${d.paciente}` },
     });
 
-    // ── helpers que dependem do doc ──
+    /**
+     * Logo do nutricionista, se ele enviou um. Caminho local (upload em
+     * /uploads/timbre/) ou URL http(s). Falha de leitura nunca quebra o
+     * documento: cai no cabeçalho só texto.
+     */
+    const logo = carregarLogo(prof.logoUrl);
+    const temLogo = logo !== null;
+    // Com logo à esquerda, o texto desloca para não colidir.
+    const nivelTexto = temLogo ? 58 : 0;
+
     const topo = (pagina1: boolean) => {
       const alt = pagina1 ? 96 : 62;
       doc.save();
@@ -426,20 +454,33 @@ export class PlanoPdfService {
       doc.rect(0, alt, W, 3.5).fill(pagina1 ? TEAL : AZUL_MED);
       doc.restore();
 
+      if (temLogo && logo) {
+        const boxH = pagina1 ? 40 : 28;
+        const boxW = pagina1 ? 110 : 78;
+        try {
+          doc.image(logo, ME, (alt - boxH) / 2, { fit: [boxW, boxH] });
+        } catch {
+          // imagem corrompida: segue sem logo
+        }
+      }
+
       doc.fillColor('#ffffff');
       doc.font('Helvetica-Bold').fontSize(pagina1 ? 15 : 11.5)
         .text((prof.nome ?? '').toUpperCase(), 0, pagina1 ? 26 : 18, {
-          align: 'center', width: W,
+          align: 'center', width: W - nivelTexto * 2,
         });
       if (pagina1) {
         doc.font('Helvetica').fontSize(9.5).fillColor('#bed0e4')
-          .text(prof.especialidade, { align: 'center', width: W });
+          .text(prof.especialidade, { align: 'center', width: W - nivelTexto * 2 });
         doc.font('Helvetica').fontSize(8.5).fillColor('#93aac6')
-          .text(`${prof.conselhoTipo} ${prof.conselhoNumero}`, { align: 'center', width: W });
+          .text(
+            `${prof.conselhoTipo} ${prof.conselhoNumero}${prof.instagram ? `  ·  ${prof.instagram}` : ''}`,
+            { align: 'center', width: W - nivelTexto * 2 },
+          );
       } else {
         doc.font('Helvetica').fontSize(8).fillColor('#93aac6')
           .text(`${prof.conselhoTipo} ${prof.conselhoNumero}  ·  ${d.paciente}`, {
-            align: 'center', width: W,
+            align: 'center', width: W - nivelTexto * 2,
           });
       }
     };
@@ -582,7 +623,7 @@ export class PlanoPdfService {
 
     /** Altura que a refeição vai ocupar (título + itens + rodapé de macros). */
     const alturaRefeicao = (r: RefeicaoPdf): number => {
-      let h = 30 + 6; // faixa de título + respiro
+      let h = 30 + 6;
       for (const it of r.itens) {
         doc.font('Helvetica').fontSize(10);
         const linhas = Math.max(
@@ -592,7 +633,7 @@ export class PlanoPdfService {
         h += 9 + linhas * 12.5;
         h += it.substitutos.length * 13 + (it.substitutos.length ? 4 : 0);
       }
-      return h + 20; // rodapé com macros
+      return h + 20;
     };
 
     for (const r of d.refeicoes) {
@@ -624,9 +665,7 @@ export class PlanoPdfService {
         const altSub = it.substitutos.length * 13;
         const altTotal = altItem + altSub + (it.substitutos.length ? 4 : 0);
 
-        if (doc.y + altTotal > H - MINF - 18) {
-          novaPagina('Planejamento das refeições (continuação)');
-        }
+        if (doc.y + altTotal > H - MINF - 18) novaPagina('Planejamento das refeições (continuação)');
 
         const yI = doc.y;
         doc.rect(ME, yI, UTIL, altTotal).fill(zebra ? '#f7f9fc' : '#ffffff');
@@ -793,8 +832,11 @@ export class PlanoPdfService {
       );
 
     doc.moveDown(1.8);
+    const localData = prof.cidade
+      ? `${prof.cidade}, ${dataExtenso(new Date())}.`
+      : `${dataExtenso(new Date())}.`;
     doc.font('Helvetica').fontSize(8.5).fillColor(SUAVE)
-      .text(`São Paulo, ${dataExtenso(new Date())}.`, ME, doc.y, { width: UTIL, align: 'center' });
+      .text(localData, ME, doc.y, { width: UTIL, align: 'center' });
     doc.moveDown(2.6);
     const yR = doc.y;
     doc.moveTo(W / 2 - 100, yR).lineTo(W / 2 + 100, yR)
@@ -831,13 +873,18 @@ export class PlanoPdfService {
   }
 }
 
-/** Idade em anos a partir da data de nascimento. */
-function idadeEmAnos(nasc: Date | null): number {
-  if (!nasc) return 30;
-  const hoje = new Date();
-  const nascD = new Date(nasc);
-  let idade = hoje.getFullYear() - nascD.getFullYear();
-  const m = hoje.getMonth() - nascD.getMonth();
-  if (m < 0 || (m === 0 && hoje.getDate() < nascD.getDate())) idade--;
-  return idade > 0 && idade < 120 ? idade : 30;
+/**
+ * Resolve o logo do profissional para algo que o pdfkit aceite: caminho do
+ * arquivo no disco ou URL absoluta. Devolve null quando não há logo ou quando
+ * o arquivo não existe — o documento sai só com o texto.
+ */
+function carregarLogo(logoUrl: string | null): Buffer | string | null {
+  if (!logoUrl?.trim()) return null;
+  const alvo = logoUrl.trim();
+  if (/^https?:\/\//i.test(alvo)) return alvo;
+  const candidatos = [alvo, join(process.cwd(), alvo.replace(/^\/+/, ''))];
+  for (const c of candidatos) {
+    if (existsSync(c)) return c;
+  }
+  return null;
 }
