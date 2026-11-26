@@ -99,6 +99,7 @@ export class PacientesService {
           genero: p.genero,
           objetivo: p.objetivo,
           notasClinicas: p.notasClinicas,
+          metaAguaMl: p.metaAguaMl ?? null,
           cobrancaMensal: p.cobrancaMensal
             ? {
                 ativa: p.cobrancaMensal.ativa,
@@ -146,6 +147,7 @@ export class PacientesService {
       objetivo: paciente.objetivo,
       notasClinicas: paciente.notasClinicas,
       urlFotoPerfil: paciente.urlFotoPerfil ?? null,
+      metaAguaMl: paciente.metaAguaMl ?? null,
       cobrancaMensal: paciente.cobrancaMensal
         ? {
             ativa: paciente.cobrancaMensal.ativa,
@@ -314,6 +316,9 @@ export class PacientesService {
     if (dto.genero !== undefined) data.genero = dto.genero;
     if (dto.objetivo !== undefined) data.objetivo = dto.objetivo;
     if (dto.notasClinicas !== undefined) data.notasClinicas = dto.notasClinicas;
+    // Meta de água padrão do paciente, em mililitros. O plano alimentar pode
+    // sobrescrever (metaAguaLitros é do plano, não do paciente).
+    if (dto.metaAguaMl !== undefined) data.metaAguaMl = dto.metaAguaMl;
     await this.prisma.paciente.update({
       where: { id },
       data,
