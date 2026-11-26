@@ -41,7 +41,6 @@ enum TipoLancamentoFinanceiro {
   receita
   despesa
 }
-
 enum StatusConsulta {
   agendada
   realizada
@@ -242,9 +241,9 @@ model CobrancaPaciente {
 }
 
 model ConsultaAgendada {
-  id                Int            @id @default(autoincrement())
-  idPaciente        Int            @map("id_paciente")
-  idNutricionista   Int            @map("id_nutricionista")
+  id                Int      @id @default(autoincrement())
+  idPaciente        Int      @map("id_paciente")
+  idNutricionista   Int      @map("id_nutricionista")
   inicio            DateTime       @db.Timestamptz(3) @map("inicio")
   /// Sem status, agendamento e atendimento eram a mesma coisa e a taxa de
   /// falta não existia.
@@ -368,4 +367,47 @@ model AvaliacaoFisica {
   paciente Paciente @relation(fields: [idPaciente], references: [id], onDelete: Cascade)
 
   @@map("avaliacoes_fisicas")
+}
+
+// ---------------------------------------------------------------------------
+// Exames laboratoriais
+// ---------------------------------------------------------------------------
+
+/// Exame laboratorial de uma coleta (uma data, vários itens).
+model ExameLaboratorial {
+  id           Int      @id @default(autoincrement())
+  idPaciente   Int      @map("id_paciente")
+  /// Data da COLETA (não da digitação) — é por ela que se ordena o histórico.
+  dataColeta   DateTime @db.Date @map("data_coleta")
+  laboratorio  String?
+  observacoes  String?  @db.Text
+  criadoEm     DateTime @default(now()) @map("criado_em")
+  atualizadoEm DateTime @updatedAt @map("atualizado_em")
+
+  paciente Paciente      @relation(fields: [idPaciente], references: [id], onDelete: Cascade)
+  itens    ItemExame[]
+
+  @@index([idPaciente, dataColeta])
+  @@map("exames_laboratoriais")
+}
+
+/// Um biomarcador dentro de uma coleta (ex.: Ferritina = 18 ng/mL).
+model ItemExame {
+  id             Int     @id @default(autoincrement())
+  idExame        Int     @map("id_exame")
+  /// Nome do biomarcador, usado para agrupar o mesmo parâmetro entre coletas.
+  nome           String
+  valor          Float?
+  unidade        String?
+  /// Faixa de referência do laudo. Guardada porque muda entre laboratórios.
+  referenciaMin  Float?  @map("referencia_min")
+  referenciaMax  Float?  @map("referencia_max")
+  /// Texto livre do laudo quando o resultado não é numérico ("não reagente").
+  resultadoTexto String? @map("resultado_texto")
+
+  exame ExameLaboratorial @relation(fields: [idExame], references: [id], onDelete: Cascade)
+
+  @@index([idExame])
+  @@index([nome])
+  @@map("itens_exame")
 }
