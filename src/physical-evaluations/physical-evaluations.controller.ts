@@ -5,6 +5,7 @@ import {
   Get,
   Param,
   ParseIntPipe,
+  Patch,
   Post,
   Put,
   Query,
@@ -49,6 +50,20 @@ export class PhysicalEvaluationsController {
     );
   }
 
+  /**
+   * Série de evolução do paciente (peso, % gordura, circunferências...) a
+   * partir das avaliações físicas. Precisa vir antes de `:id`, senão
+   * "evolucao" é interpretado como um id.
+   */
+  @Get('paciente/:idPaciente/evolucao')
+  @ApiResponse({ status: 200, description: 'Série histórica de avaliações' })
+  serieEvolucao(
+    @Param('idPaciente', ParseIntPipe) idPaciente: number,
+    @CurrentUser() user: JwtPayloadUser,
+  ) {
+    return this.physicalEvaluationsService.serieEvolucao(idPaciente, user);
+  }
+
   @Get(':id')
   @ApiResponse({ status: 200, description: 'Avaliação encontrada' })
   @ApiResponse({ status: 404, description: 'Avaliação não encontrada' })
@@ -59,7 +74,9 @@ export class PhysicalEvaluationsController {
     return this.physicalEvaluationsService.findOne(id, user);
   }
 
+  // PUT e PATCH fazem a mesma coisa: quem já chamava PUT continua funcionando.
   @Put(':id')
+  @Patch(':id')
   @ApiResponse({ status: 200, description: 'Avaliação atualizada' })
   @ApiResponse({ status: 404, description: 'Avaliação não encontrada' })
   update(

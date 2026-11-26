@@ -23,6 +23,7 @@ import { AnamneseModule } from './anamnese/anamnese.module';
 import { FinanceiroModule } from './financeiro/financeiro.module';
 import { TreinosModule } from './treinos/treinos.module';
 import { MetasModule } from './metas/metas.module';
+import { ExamesModule } from './exames/exames.module';
 import { AnaliseModule } from './analise/analise.module';
 import { DocumentosModule } from './documentos/documentos.module';
 import { CalculoEnergeticoModule } from './calculo-energetico/calculo-energetico.module';
@@ -55,6 +56,7 @@ import { NutrientesModule } from './micronutrientes/nutrientes.module';
     FinanceiroModule,
     TreinosModule,
     MetasModule,
+    ExamesModule,
     AnaliseModule,
     DocumentosModule,
     CalculoEnergeticoModule,

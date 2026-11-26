@@ -1,4 +1,4 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiPropertyOptional } from '@nestjs/swagger';
 import { IsDateString, IsNumber, IsOptional, IsString } from 'class-validator';
 
 export class CreateMetaDto {
@@ -22,4 +22,12 @@ export class CreateMetaDto {
   @IsOptional()
   @IsDateString()
   prazo?: string;
+
+  @ApiPropertyOptional({
+    description: 'Valor medido hoje, para calcular o progresso da meta',
+    example: 86.5,
+  })
+  @IsOptional()
+  @IsNumber()
+  valorAtual?: number;
 }
