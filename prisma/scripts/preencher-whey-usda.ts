@@ -14,8 +14,11 @@
  * como referência de base — com a ressalva registrada no campo `fonte`.
  *
  * Também DEDUPLICA: o banco tem 4 registros "Whey protein concentrado".
- * Mantém o mais antigo (o que os planos referenciam) e desativa os outros 3
- * (marca = "DUPLICADO - consolidar", para achar na UI).
+ * Mantém o mais antigo (o que os planos referenciam) e marca os outros 3.
+ *
+ * NOTA DE SCHEMA: o model BaseAlimento NÃO possui colunas de timestamp
+ * (createdAt / criadoEm / atualizadoEm). Nunca incluir essas chaves no
+ * `select` — o Prisma Client rejeita com TS2353.
  */
 
 import 'dotenv/config';
@@ -32,45 +35,118 @@ function getDatasourceUrl(): string {
   return `postgresql://${user}:${password}@${host}:${port}/${name}?schema=public`;
 }
 
-const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: getDatasourceUrl() }) });
+const prisma = new PrismaClient({
+  adapter: new PrismaPg({ connectionString: getDatasourceUrl() }),
+});
 
 /**
  * USDA FDC 173180 — Beverages, Protein powder whey based (SR Legacy, 2019).
- * Valores por 100 g. Verificação: soma dos ácidos graxos (1,24 g) < lipídios
- * totais (~2 g); todos os 23 abaixo dos tetos de sanidade do importador.
+ * Valores por 100 g.
  * https://fdc.nal.usda.gov/fdc-app.html#/food-details/173180/nutrients
  */
 const WHEY_USDA = {
-  calcio: 469.0,            // mg — coerente com WPC 500-700 mg (USDEC, tabela 6.7.1)
-  ferro: 1.13,              // mg
-  magnesio: 195.0,          // mg
-  fosforo: 1321.0,          // mg
-  potassio: 500.0,          // mg
-  zinco: 6.18,              // mg
-  cobre: 0.049,             // mg
-  selenio: 26.7,            // mcg
-  vitaminaARae: 0.0,        // mcg — whey não tem vitamina A
-  vitaminaC: 0.0,           // mg
-  vitaminaD: 0.0,           // mcg
-  vitaminaE: 0.0,           // mg
-  tiamina: 0.609,           // mg
-  vitaminaB2: 2.017,        // mg — riboflavina do soro de leite, alta mesmo
-  vitaminaB3: 1.136,        // mg
-  vitaminaB6: 0.607,        // mg
-  vitaminaB12: 2.45,        // mcg
-  folato: 33.0,             // mcg
-  gorduraSaturada: 0.781,   // g
+  calcio: 469.0,                // mg
+  ferro: 1.13,                  // mg
+  magnesio: 195.0,              // mg
+  fosforo: 1321.0,              // mg
+  potassio: 500.0,              // mg
+  zinco: 6.18,                  // mg
+  cobre: 0.049,                 // mg
+  selenio: 26.7,                // mcg
+  vitaminaARae: 0.0,            // mcg
+  vitaminaC: 0.0,               // mg
+  vitaminaD: 0.0,               // mcg
+  vitaminaE: 0.0,               // mg
+  tiamina: 0.609,               // mg
+  vitaminaB2: 2.017,            // mg
+  vitaminaB3: 1.136,            // mg
+  vitaminaB6: 0.607,            // mg
+  vitaminaB12: 2.45,            // mcg
+  folato: 33.0,                 // mcg
+  gorduraSaturada: 0.781,       // g
   gorduraMonoinsaturada: 0.158, // g
   gorduraPoliinsaturada: 0.299, // g
-  gorduraTrans: 0.0,        // g
-  colesterol: 16.0,         // mg
+  gorduraTrans: 0.0,            // g
+  colesterol: 16.0,             // mg
 } as const;
+
+const SOMA_ACIDOS_GRAXOS =
+  WHEY_USDA.gorduraSaturada +
+  WHEY_USDA.gorduraMonoinsaturada +
+  WHEY_USDA.gorduraPoliinsaturada;
+
+const FONTE_USDA = 'USDA FDC 173180 (SR Legacy) — whey concentrate';
+const MARCA_DUPLICADO = 'DUPLICADO - consolidar';
+
+/** Detecta marca já sinalizada, seja pelo fallback ou pelo sufixo. */
+function jaMarcado(marca: string | null | undefined): boolean {
+  return /duplicado/i.test(marca ?? '');
+}
+
+/**
+ * Acrescenta o marcador sem destruir o valor original e sem duplicar.
+ * Idempotente: rodar N vezes produz o mesmo resultado.
+ */
+function marcaComSelo(original: string | null | undefined): string {
+  const base = (original ?? '').trim();
+  if (!base) return MARCA_DUPLICADO;
+  if (jaMarcado(base)) return base; // já selado, não toca
+  return `${base} [DUPLICADO]`;
+}
+
+/** Fonte acumulativa: preserva a origem anterior em vez de sobrescrever. */
+function fonteAcumulada(original: string | null | undefined): string {
+  const base = (original ?? '').trim();
+  if (!base) return FONTE_USDA;
+  if (base.includes(FONTE_USDA)) return base; // já aplicado
+  return `${base} | ${FONTE_USDA}`;
+}
+
+interface RegistroWhey {
+  id: number;
+  nome: string;
+  nomeExibicao: string | null;
+  marca: string | null;
+  fonte: string | null;
+  calcio: number | null;
+  gorduras: number | null;
+  proteinas: number | null;
+  calorias: number | null;
+}
+
+async function contarUso(ids: number[]): Promise<Map<number, number>> {
+  const pares = await Promise.all(
+    ids.map(async (id) => {
+      const itens = await prisma.itemDieta.count({ where: { idAlimento: id } });
+      return [id, itens] as const;
+    }),
+  );
+  return new Map(pares);
+}
+
+/**
+ * Coerência física: a soma dos ácidos graxos não pode exceder a gordura total
+ * declarada no registro. Se exceder, o registro tem macro incompatível com o
+ * perfil USDA e gravar os micros criaria um dado impossível.
+ */
+function validarCoerencia(registros: RegistroWhey[]): RegistroWhey[] {
+  const invalidos: RegistroWhey[] = [];
+  for (const r of registros) {
+    if (r.gorduras == null) continue; // sem macro, nada a comparar
+    if (SOMA_ACIDOS_GRAXOS > r.gorduras + 0.05) {
+      invalidos.push(r);
+    }
+  }
+  return invalidos;
+}
 
 async function main() {
   const aplicar = process.argv.includes('--aplicar');
-  console.log(aplicar ? 'MODO APLICAR (vai gravar)' : 'MODO RELATÓRIO (nada grava)');
+  console.log(
+    aplicar ? 'MODO APLICAR (vai gravar)' : 'MODO RELATÓRIO (nada grava)',
+  );
 
-  const registros = await prisma.baseAlimento.findMany({
+  const registros: RegistroWhey[] = await prisma.baseAlimento.findMany({
     where: {
       OR: [
         { nome: { contains: 'whey', mode: 'insensitive' } },
@@ -79,9 +155,15 @@ async function main() {
     },
     orderBy: { id: 'asc' },
     select: {
-      id: true, nome: true, nomeExibicao: true, marca: true, fonte: true,
-      codigoTbca: true, classeTbca: true, createdAt: true,
+      id: true,
+      nome: true,
+      nomeExibicao: true,
+      marca: true,
+      fonte: true,
       calcio: true,
+      gorduras: true,
+      proteinas: true,
+      calorias: true,
     },
   });
 
@@ -90,17 +172,62 @@ async function main() {
     return;
   }
 
+  const uso = await contarUso(registros.map((r) => r.id));
+
   console.log(`\nRegistros de whey no banco: ${registros.length}`);
   for (const r of registros) {
+    const rotulo = (r.nomeExibicao || r.nome).padEnd(36);
     console.log(
-      `  #${r.id} ${(r.nomeExibicao || r.nome).padEnd(40)} marca=${r.marca ?? '—'}` +
-      ` fonte=${r.fonte ?? '—'} calcio=${r.calcio ?? 'null'}`,
+      `  #${String(r.id).padStart(6)} ${rotulo}` +
+        ` micros=${(r.calcio === null ? 'vazio' : 'ok').padEnd(6)}` +
+        ` kcal=${String(r.calorias ?? '—').padStart(5)}` +
+        ` P=${String(r.proteinas ?? '—').padStart(5)}` +
+        ` G=${String(r.gorduras ?? '—').padStart(5)}` +
+        ` itens=${uso.get(r.id) ?? 0}` +
+        ` | marca="${r.marca ?? '—'}"`,
     );
   }
 
-  // Dedup: mesmo nome normalizado -> mantém o de menor id (o mais antigo,
-  // que os planos referenciam), marca os demais.
-  const porNome = new Map<string, typeof registros>();
+  // ---- Coerência macro x micro --------------------------------------------
+  const incoerentes = validarCoerencia(registros);
+  if (incoerentes.length > 0) {
+    console.log(
+      `\n[ERRO CRÍTICO] ${incoerentes.length} registro(s) declaram gordura ` +
+        `total menor que a soma de ácidos graxos do perfil USDA ` +
+        `(${SOMA_ACIDOS_GRAXOS.toFixed(3)} g/100 g):`,
+    );
+    for (const r of incoerentes) {
+      console.log(
+        `  #${r.id} gorduras=${r.gorduras} g/100 g < ${SOMA_ACIDOS_GRAXOS.toFixed(3)} g`,
+      );
+    }
+    console.log(
+      '\nGravar os micros nesses registros criaria dado fisicamente impossível.\n' +
+        'Corrija o macro de gordura do registro (ou use outro perfil USDA) antes de aplicar.',
+    );
+    if (aplicar) {
+      console.log('\n[ABORTADO] Nada foi gravado.');
+      return;
+    }
+  } else {
+    console.log(
+      `\n[OK] Coerência de gordura: soma dos ácidos graxos ` +
+        `${SOMA_ACIDOS_GRAXOS.toFixed(3)} g ≤ gordura total em todos os registros.`,
+    );
+  }
+
+  const todosSeed = registros.every((r) =>
+    (r.fonte ?? '').includes('seed-teste'),
+  );
+  if (todosSeed) {
+    console.log(
+      '\n[AVISO] Todos os registros vêm de "seed-teste". ' +
+        'Se este é o banco de produção, avalie excluir em vez de consolidar.',
+    );
+  }
+
+  // ---- Dedup --------------------------------------------------------------
+  const porNome = new Map<string, RegistroWhey[]>();
   for (const r of registros) {
     const chave = (r.nomeExibicao || r.nome).toLowerCase().trim();
     const lista = porNome.get(chave) ?? [];
@@ -109,52 +236,88 @@ async function main() {
   }
 
   const duplicados: number[] = [];
-  for (const lista of porNome.values()) {
+  for (const [chave, lista] of porNome.entries()) {
     if (lista.length > 1) {
-      for (const r of lista.slice(1)) duplicados.push(r.id);
+      const manter = lista[0].id;
+      const marcar = lista.slice(1).map((r) => r.id);
+      console.log(
+        `\nChave "${chave}": mantém #${manter}, marca ${marcar.join(', ')}`,
+      );
+      duplicados.push(...marcar);
     }
   }
-  console.log(`\nDuplicados a marcar: ${duplicados.length} -> ids ${duplicados.join(', ') || '—'}`);
+
+  const pendentes = duplicados.filter((id) => {
+    const r = registros.find((x) => x.id === id);
+    return !jaMarcado(r?.marca);
+  });
+
+  console.log(
+    `\nDuplicados: ${duplicados.length} total, ${pendentes.length} ainda sem selo.`,
+  );
+
+  const duplicadosEmUso = duplicados.filter((id) => (uso.get(id) ?? 0) > 0);
+  if (duplicadosEmUso.length > 0) {
+    console.log(
+      `[ATENÇÃO] Em uso por itens de dieta: ${duplicadosEmUso.join(', ')}.`,
+    );
+  }
 
   if (!aplicar) {
-    console.log('\nValores que seriam gravados (por 100 g, USDA FDC 173180):');
-    for (const [campo, v] of Object.entries(WHEY_USDA)) {
-      console.log(`  ${campo.padEnd(22)} ${v}`);
-    }
     console.log('\nPara gravar: npx tsx prisma/scripts/preencher-whey-usda.ts --aplicar');
     return;
   }
 
-  // 1. Preencher TODOS os registros de whey sem micro (o plano pode apontar
-  //    para qualquer um deles).
+  // ---- Aplicar: micros ----------------------------------------------------
   let preenchidos = 0;
+  let preservados = 0;
   for (const r of registros) {
-    if (r.calcio !== null) continue; // já tem dado, não sobrescreve
+    if (r.calcio !== null) {
+      preservados += 1;
+      continue;
+    }
     await prisma.baseAlimento.update({
       where: { id: r.id },
-      data: { ...WHEY_USDA, fonte: 'USDA FDC 173180 (SR Legacy) — whey concentrate' },
+      data: {
+        ...WHEY_USDA,
+        fonte: fonteAcumulada(r.fonte),
+      },
     });
     preenchidos += 1;
+    console.log(
+      `  #${r.id} micros gravados | fonte: "${r.fonte ?? '—'}" -> "${fonteAcumulada(r.fonte)}"`,
+    );
   }
-  console.log(`\nPreenchidos: ${preenchidos} registros.`);
+  console.log(`\nPreenchidos: ${preenchidos} | já tinham micros: ${preservados}`);
 
-  // 2. Marcar duplicados (só se nenhum estiver em uso por itens de dieta).
-  if (duplicados.length > 0) {
-    const emUso = await prisma.itemDieta.count({
-      where: { idAlimento: { in: duplicados } },
-    });
-    console.log(`Duplicados referenciados por itens de dieta: ${emUso}`);
-    if (emUso === 0) {
-      await prisma.baseAlimento.updateMany({
-        where: { id: { in: duplicados } },
-        data: { marca: 'DUPLICADO - consolidar' },
-      });
-      console.log('Duplicados marcados com marca="DUPLICADO - consolidar".');
-    } else {
-      console.log('Há itens de dieta apontando para duplicados — NÃO marquei nada.');
-      console.log('Me manda essa saída que eu faço a consolidação com remapeamento.');
-    }
+  // ---- Aplicar: marcar duplicados -----------------------------------------
+  if (duplicados.length === 0) {
+    console.log('Nada a marcar: não há duplicados.');
+    return;
   }
+
+  if (duplicadosEmUso.length > 0) {
+    console.log(
+      '\n[PARADO] Duplicado em uso por plano ativo. Remapeie antes de marcar.',
+    );
+    return;
+  }
+
+  if (pendentes.length === 0) {
+    console.log('Todos os duplicados já estão selados — nada a fazer.');
+    return;
+  }
+
+  for (const id of pendentes) {
+    const r = registros.find((x) => x.id === id);
+    const nova = marcaComSelo(r?.marca);
+    await prisma.baseAlimento.update({
+      where: { id },
+      data: { marca: nova },
+    });
+    console.log(`  #${id} marca: "${r?.marca ?? '—'}" -> "${nova}"`);
+  }
+  console.log(`\nSelados: ${pendentes.length} registro(s).`);
 }
 
 main()
