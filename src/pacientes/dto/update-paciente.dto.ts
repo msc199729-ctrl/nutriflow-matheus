@@ -88,6 +88,17 @@ export class UpdatePacienteDto {
 
   @ApiPropertyOptional({
     description:
+      'Meta diária de água em mililitros. Padrão do paciente; o plano alimentar pode sobrescrever.',
+    example: 2450,
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(15000)
+  metaAguaMl?: number | null;
+
+  @ApiPropertyOptional({
+    description:
       'Configuração opcional para geração de receita mensal no financeiro',
     type: UpdateCobrancaMensalPacienteDto,
   })
