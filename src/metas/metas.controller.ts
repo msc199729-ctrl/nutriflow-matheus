@@ -4,6 +4,7 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { JwtPayloadUser } from '../common/decorators/current-user.decorator';
 import { MetasService } from './metas.service';
 import { CreateMetaDto } from './dto/create-meta.dto';
+import { UpdateMetaDto } from './dto/update-meta.dto';
 
 @ApiTags('Metas')
 @ApiBearerAuth('access-token')
@@ -26,6 +27,16 @@ export class MetasController {
     @Param('idPaciente', ParseIntPipe) idPaciente: number,
   ) {
     return this.metasService.findAll(user, idPaciente);
+  }
+
+  @Patch(':id')
+  update(
+    @CurrentUser() user: JwtPayloadUser,
+    @Param('idPaciente', ParseIntPipe) idPaciente: number,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateMetaDto,
+  ) {
+    return this.metasService.update(user, idPaciente, id, dto);
   }
 
   @Patch(':id/concluir')
