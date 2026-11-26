@@ -387,3 +387,185 @@ export class FinanceiroService {
       fluxoMensal: fluxo,
     };
   }
+
+  private async gerarMensalidadesCore(params: {
+    competencia?: string;
+    workspaceId?: number;
+    nutricionistaId?: number;
+  }) {
+    const competencia = params.competencia?.trim() || this.currentMonthKey();
+    const { end } = this.monthBounds(competencia);
+
+    const cobrancas = await this.prisma.cobrancaPaciente.findMany({
+      where: {
+        ativa: true,
+        ...(params.workspaceId !== undefined
+          ? { workspaceId: params.workspaceId }
+          : {}),
+        inicioCobranca: { lt: end },
+        paciente:
+          params.nutricionistaId !== undefined
+            ? { idNutricionista: params.nutricionistaId }
+            : undefined,
+      },
+      include: {
+        paciente: {
+          select: { id: true, nome: true, idNutricionista: true },
+        },
+      },
+    });
+
+    let geradas = 0;
+    let ignoradas = 0;
+
+    for (const cobranca of cobrancas) {
+      const exists = await this.prisma.lancamentoFinanceiro.findFirst({
+        where: {
+          workspaceId: cobranca.workspaceId,
+          idPaciente: cobranca.idPaciente,
+          competencia,
+          tipo: 'receita',
+          origem: 'mensalidade',
+        },
+        select: { id: true },
+      });
+      if (exists) {
+        ignoradas++;
+        continue;
+      }
+
+      const y = Number(competencia.slice(0, 4));
+      const m = Number(competencia.slice(5, 7));
+      const lastDay = new Date(Date.UTC(y, m, 0)).getUTCDate();
+      const day = Math.min(cobranca.diaVencimento, lastDay);
+      const vencimento = new Date(Date.UTC(y, m - 1, day));
+
+      await this.prisma.lancamentoFinanceiro.create({
+        data: {
+          workspaceId: cobranca.workspaceId,
+          idResponsavel: cobranca.paciente.idNutricionista,
+          idPaciente: cobranca.idPaciente,
+          descricao: `Mensalidade - ${cobranca.paciente.nome ?? `Paciente #${cobranca.idPaciente}`} - ${competencia}`,
+          pacienteNome: cobranca.paciente.nome,
+          categoria: cobranca.categoria ?? 'Mensalidade',
+          competencia,
+          origem: 'mensalidade',
+          tipo: 'receita',
+          status: 'pendente',
+          valor: cobranca.valorMensal,
+          vencimento,
+          observacoes: cobranca.observacoes,
+        },
+      });
+      geradas++;
+    }
+
+    return {
+      competencia,
+      totalCobrancasAtivas: cobrancas.length,
+      geradas,
+      ignoradas,
+    };
+  }
+
+  async gerarMensalidades(user: JwtPayloadUser, month?: string) {
+    this.ensureCanManage(user);
+    const workspaceId = requireWorkspaceId(user);
+    return this.gerarMensalidadesCore({
+      competencia: month,
+      workspaceId,
+      nutricionistaId:
+        user.perfil === PerfilUsuario.nutricionista ? user.sub : undefined,
+    });
+  }
+
+  /**
+   * Saneamento diário: grava `atrasado` no banco.
+   *
+   * A leitura já deriva o status (é ela que garante o número certo na tela),
+   * mas deixar a coluna coerente evita que qualquer consulta futura — relatório,
+   * exportação, SQL avulso — veja um dado que não corresponde à realidade.
+   */
+  @Cron('10 3 * * *', { timeZone: 'America/Sao_Paulo' })
+  async marcarVencidosComoAtrasados() {
+    try {
+      const hoje = this.hojeUtc();
+      const resultado = await this.prisma.lancamentoFinanceiro.updateMany({
+        where: {
+          status: StatusLancamentoFinanceiro.pendente,
+          vencimento: { lt: hoje },
+        },
+        data: { status: StatusLancamentoFinanceiro.atrasado },
+      });
+      if (resultado.count > 0) {
+        this.logger.log(
+          `Saneamento financeiro: ${resultado.count} lançamento(s) vencido(s) marcado(s) como atrasado.`,
+        );
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(`Falha ao marcar vencidos como atrasados: ${message}`);
+    }
+  }
+
+  /**
+   * CSV do período filtrado, para mandar ao contador.
+   *
+   * Separador `;` e vírgula decimal porque é o que o Excel em português
+   * entende sem pedir importação.
+   */
+  async exportarCsv(
+    user: JwtPayloadUser,
+    query: QueryLancamentosFinanceirosDto,
+  ): Promise<string> {
+    const rows = await this.list(user, query);
+    const cabecalho = [
+      'Vencimento',
+      'Tipo',
+      'Status',
+      'Descrição',
+      'Paciente',
+      'Categoria',
+      'Valor',
+      'Pago em',
+    ];
+    const escapar = (v: unknown): string => {
+      const texto = v == null ? '' : String(v);
+      return /[";\n]/.test(texto) ? `"${texto.replace(/"/g, '""')}"` : texto;
+    };
+    const linhas = rows.map((r) =>
+      [
+        r.vencimento,
+        r.tipo,
+        r.status,
+        escapar(r.descricao),
+        escapar(r.pacienteNome ?? ''),
+        escapar(r.categoria ?? ''),
+        r.valor.toFixed(2).replace('.', ','),
+        r.pagoEm ?? '',
+      ].join(';'),
+    );
+    // BOM para o Excel abrir os acentos corretamente em UTF-8.
+    return '\uFEFF' + [cabecalho.join(';'), ...linhas].join('\r\n');
+  }
+
+  @Cron('5 0 1 * *', { timeZone: 'America/Sao_Paulo' })
+  async gerarMensalidadesAutomaticamente() {
+    if (process.env.FINANCEIRO_AUTO_GERAR_MENSALIDADES === '0') {
+      this.logger.log('Geração automática de mensalidades desativada por ambiente.');
+      return;
+    }
+
+    try {
+      const resultado = await this.gerarMensalidadesCore({});
+      this.logger.log(
+        `Mensalidades automáticas ${resultado.competencia}: geradas=${resultado.geradas}, ignoradas=${resultado.ignoradas}`,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(
+        `Falha na geração automática de mensalidades: ${message}`,
+      );
+    }
+  }
+}
