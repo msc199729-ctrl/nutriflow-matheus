@@ -1,5 +1,4 @@
 import {
-  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -14,8 +13,6 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { diskStorage } from 'multer';
-import { extname, join } from 'path';
 import {
   ApiBearerAuth,
   ApiBody,
@@ -24,23 +21,13 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
-import { PacientesService } from './pacientes.service';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { JwtPayloadUser } from '../common/decorators/current-user.decorator';
+import { PacientesService } from './pacientes.service';
 import { CreatePacienteDto } from './dto/create-paciente.dto';
 import { UpdatePacienteDto } from './dto/update-paciente.dto';
 import { CreateNotaClinicaDto } from './dto/create-nota-clinica.dto';
-
-const PACIENTE_FOTO_DIR = join(process.cwd(), 'uploads', 'paciente-perfil');
-
-const pacienteFotoStorage = diskStorage({
-  destination: PACIENTE_FOTO_DIR,
-  filename: (_req, file, cb) => {
-    const suffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
-    const ext = extname(file.originalname) || '.jpg';
-    cb(null, `perfil-${suffix}${ext}`);
-  },
-});
+import { pacientePerfilUpload } from './paciente-perfil-upload.config';
 
 @ApiTags('Pacientes')
 @ApiBearerAuth('access-token')
@@ -51,10 +38,17 @@ export class PacientesController {
   @Get()
   @ApiQuery({ name: 'page', required: false, type: Number })
   @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiQuery({
+    name: 'busca',
+    required: false,
+    description:
+      'Filtra por nome, e-mail ou celular (útil para seletores com muitos pacientes)',
+  })
   @ApiResponse({ status: 200, description: 'Lista paginada de pacientes do nutricionista' })
   findAll(
     @Query('page') page: string | undefined,
     @Query('limit') limit: string | undefined,
+    @Query('busca') busca: string | undefined,
     @CurrentUser() user: JwtPayloadUser,
   ) {
     if (
@@ -67,75 +61,42 @@ export class PacientesController {
     }
     const pageNum = page ? parseInt(page, 10) : 1;
     const limitNum = limit ? parseInt(limit, 10) : 10;
-    return this.pacientesService.findAll(user, pageNum, limitNum);
+    return this.pacientesService.findAll(user, pageNum, limitNum, busca);
   }
 
   @Get(':id/notas-clinicas')
   @ApiResponse({ status: 200, description: 'Lista de notas clínicas do paciente' })
   @ApiQuery({ name: 'tipo', required: false, description: 'Filtrar por tipo (consulta, exame, orientacao, atestado, recibo)' })
   listNotasClinicas(
-    @Param('id', ParseIntPipe) idPaciente: number,
+    @Param('id', ParseIntPipe) id: number,
     @Query('tipo') tipo: string | undefined,
     @CurrentUser() user: JwtPayloadUser,
   ) {
-    return this.pacientesService.listNotasClinicas(idPaciente, user, tipo);
+    return this.pacientesService.listNotasClinicas(id, user, tipo);
   }
 
   @Post(':id/notas-clinicas')
-  @ApiResponse({ status: 201, description: 'Nota criada' })
+  @ApiResponse({ status: 201, description: 'Nota clínica criada' })
   createNotaClinica(
-    @Param('id', ParseIntPipe) idPaciente: number,
+    @Param('id', ParseIntPipe) id: number,
     @Body() dto: CreateNotaClinicaDto,
     @CurrentUser() user: JwtPayloadUser,
   ) {
-    return this.pacientesService.createNotaClinica(idPaciente, dto, user);
+    return this.pacientesService.createNotaClinica(id, dto, user);
   }
 
   @Delete(':id/notas-clinicas/:notaId')
-  @ApiResponse({ status: 200, description: 'Nota removida' })
+  @ApiResponse({ status: 200, description: 'Nota clínica removida' })
   removeNotaClinica(
-    @Param('id', ParseIntPipe) idPaciente: number,
+    @Param('id', ParseIntPipe) id: number,
     @Param('notaId', ParseIntPipe) notaId: number,
     @CurrentUser() user: JwtPayloadUser,
   ) {
-    return this.pacientesService.removeNotaClinica(idPaciente, notaId, user);
-  }
-
-  @Post(':id/foto-perfil')
-  @UseInterceptors(
-    FileInterceptor('foto', {
-      storage: pacienteFotoStorage,
-      limits: { fileSize: 4 * 1024 * 1024 },
-      fileFilter: (_req, file, cb) => {
-        const ok = /image\/(jpeg|png|gif|webp)/.test(file.mimetype);
-        cb(null, !!ok);
-      },
-    }),
-  )
-  @ApiConsumes('multipart/form-data')
-  @ApiBody({
-    schema: {
-      type: 'object',
-      properties: { foto: { type: 'string', format: 'binary' } },
-    },
-  })
-  @ApiResponse({ status: 200, description: 'Foto de perfil atualizada' })
-  @ApiResponse({ status: 400, description: 'Arquivo inválido ou ausente' })
-  async uploadFotoPerfil(
-    @Param('id', ParseIntPipe) idPaciente: number,
-    @CurrentUser() user: JwtPayloadUser,
-    @UploadedFile()
-    file?: { path?: string; mimetype?: string; size?: number; originalname?: string },
-  ) {
-    if (!file?.path) {
-      throw new BadRequestException('Envie uma imagem (JPEG, PNG, GIF ou WebP).');
-    }
-    return this.pacientesService.updateFotoPerfilFromUpload(idPaciente, user, file.path);
+    return this.pacientesService.removeNotaClinica(id, notaId, user);
   }
 
   @Get(':id')
   @ApiResponse({ status: 200, description: 'Paciente encontrado' })
-  @ApiResponse({ status: 404, description: 'Paciente não encontrado' })
   findOne(
     @Param('id', ParseIntPipe) id: number,
     @CurrentUser() user: JwtPayloadUser,
@@ -145,26 +106,15 @@ export class PacientesController {
 
   @Post()
   @ApiResponse({ status: 201, description: 'Paciente criado' })
-  @ApiResponse({ status: 400, description: 'Dados inválidos' })
-  @ApiResponse({ status: 409, description: 'E-mail já cadastrado' })
   create(
     @Body() dto: CreatePacienteDto,
     @CurrentUser() user: JwtPayloadUser,
   ) {
-    if (
-      user.perfil !== 'nutricionista' &&
-      user.perfil !== 'admin_clinica'
-    ) {
-      throw new ForbiddenException(
-        'Apenas nutricionista ou gestor da clínica pode criar pacientes.',
-      );
-    }
     return this.pacientesService.create(dto, user);
   }
 
   @Patch(':id')
   @ApiResponse({ status: 200, description: 'Paciente atualizado' })
-  @ApiResponse({ status: 404, description: 'Paciente não encontrado' })
   update(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdatePacienteDto,
@@ -173,9 +123,26 @@ export class PacientesController {
     return this.pacientesService.update(id, dto, user);
   }
 
+  @Post(':id/foto-perfil')
+  @UseInterceptors(FileInterceptor('file', pacientePerfilUpload))
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: { file: { type: 'string', format: 'binary' } },
+    },
+  })
+  @ApiResponse({ status: 200, description: 'Foto de perfil atualizada' })
+  uploadFotoPerfil(
+    @Param('id', ParseIntPipe) id: number,
+    @UploadedFile() file: { path: string },
+    @CurrentUser() user: JwtPayloadUser,
+  ) {
+    return this.pacientesService.updateFotoPerfilFromUpload(id, user, file.path);
+  }
+
   @Delete(':id')
   @ApiResponse({ status: 200, description: 'Paciente removido' })
-  @ApiResponse({ status: 404, description: 'Paciente não encontrado' })
   remove(
     @Param('id', ParseIntPipe) id: number,
     @CurrentUser() user: JwtPayloadUser,
