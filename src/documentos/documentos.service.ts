@@ -1,9 +1,11 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { existsSync } from 'node:fs';
+import type { JwtPayloadUser } from '../common/decorators/current-user.decorator';
 import PDFDocument from 'pdfkit';
 import { PrismaService } from '../prisma/prisma.service';
 import { MODELOS } from './documentos.templates';
-import { PROFISSIONAL_PADRAO } from './documentos.config';
 import { AtestadoDto, DocumentoLivreDto, ReciboDto } from './documentos.dto';
+import { ProfissionalService } from './profissional.service';
 
 const MESES = [
   'janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho',
@@ -56,6 +58,15 @@ function dataExtenso(iso: string): string {
   return `${dia} de ${MESES[mes - 1]} de ${ano}`;
 }
 
+/**
+ * "Cidade, 26 de novembro de 2026." — a cidade vem do perfil do profissional.
+ * Sem cidade cadastrada, sai só a data (sem vírgula solta).
+ */
+function localEData(cidade: string | undefined, isoOuData: string): string {
+  const data = isoOuData.length === 10 ? dataExtenso(isoOuData) : isoOuData;
+  return cidade?.trim() ? `${cidade.trim()}, ${data}` : data;
+}
+
 function duracaoTexto(min: number): string {
   const h = Math.floor(min / 60);
   const m = min % 60;
@@ -69,6 +80,9 @@ interface Profissional {
   especialidade: string;
   conselhoTipo: string;
   conselhoNumero: string;
+  /** Cidade do perfil, usada na linha de assinatura. */
+  cidade: string;
+  logoUrl: string | null;
 }
 
 interface Bloco {
@@ -86,6 +100,14 @@ function renderizar(prof: Profissional, bloco: Bloco): PDFKit.PDFDocument {
     size: 'A4',
     margins: { top: MARGEM_SUP, bottom: 72, left: MARGEM_ESQ, right: MARGEM_ESQ },
   });
+
+  if (prof.logoUrl && existsSync(prof.logoUrl)) {
+    try {
+      doc.image(prof.logoUrl, MARGEM_ESQ, 40, { fit: [90, 32] });
+    } catch {
+      /* imagem inválida: segue só com o texto */
+    }
+  }
 
   doc.font('Times-Bold').fontSize(14).text(prof.nome.toUpperCase(), { align: 'center' });
   doc.font('Times-Roman').fontSize(10).text(prof.especialidade, { align: 'center' });
@@ -136,7 +158,10 @@ function renderizar(prof: Profissional, bloco: Bloco): PDFKit.PDFDocument {
 
 @Injectable()
 export class DocumentosService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly profissionalService: ProfissionalService,
+  ) {}
 
   listarModelos() {
     return MODELOS;
@@ -154,13 +179,15 @@ export class DocumentosService {
     return paciente;
   }
 
-  private profissional(dto: any): Profissional {
-    return {
-      nome: dto.nutricionistaNome?.trim() || PROFISSIONAL_PADRAO.nome,
-      especialidade: dto.nutricionistaEspecialidade?.trim() || PROFISSIONAL_PADRAO.especialidade,
-      conselhoTipo: dto.conselhoTipo?.trim() || PROFISSIONAL_PADRAO.conselhoTipo,
-      conselhoNumero: dto.conselhoNumero?.trim() || PROFISSIONAL_PADRAO.conselhoNumero,
-    };
+  /** Timbre do profissional logado; o formulário pode sobrescrever os campos. */
+  private async profissional(dto: any, user: JwtPayloadUser): Promise<Profissional> {
+    return this.profissionalService.doUsuario(user, {
+      nutricionistaNome: dto.nutricionistaNome,
+      nutricionistaEspecialidade: dto.nutricionistaEspecialidade,
+      conselhoTipo: dto.conselhoTipo,
+      conselhoNumero: dto.conselhoNumero,
+      cidade: dto.cidade,
+    });
   }
 
   async gerarAtestado(dto: AtestadoDto, user: any): Promise<PDFKit.PDFDocument> {
@@ -184,10 +211,11 @@ export class DocumentosService {
     }
     paragrafos.push('Este atestado é emitido a pedido do(a) interessado(a) para os fins que julgar necessários.');
 
-    return renderizar(this.profissional(dto), {
+    const prof = await this.profissional(dto, user);
+    return renderizar(prof, {
       titulo: 'ATESTADO DE COMPARECIMENTO',
       paragrafos,
-      assinaturaData: `${dto.cidade}, ${dataExtenso(dto.data)}.`,
+      assinaturaData: `${localEData(prof.cidade, dto.data)}.`,
     });
   }
 
@@ -204,9 +232,10 @@ export class DocumentosService {
       dto.descricao?.trim() ||
       `prestação de serviços de acompanhamento nutricional individualizado com duração de ${dto.meses} ${
         dto.meses === 1 ? 'mês' : 'meses'
-      }, compreendendo: consulta inicial com anamnese completa, avaliação física e antropométrica, análise de composição corporal, prescrição de plano alimentar personalizado, orientações nutricionais para Crossfit e corrida, protocolo de suplementação, plano de hidratação e retornos periódicos de reavaliação durante o período contratado`;
+      }, compreendendo: consulta inicial com anamnese completa, avaliação física e antropométrica, análise de composição corporal, prescrição de plano alimentar personalizado, orientações nutricionais individualizadas, protocolo de suplementação quando indicado, plano de hidratação e retornos periódicos de reavaliação durante o período contratado`;
 
-    return renderizar(this.profissional(dto), {
+    const prof = await this.profissional(dto, user);
+    return renderizar(prof, {
       titulo: 'RECIBO DE PRESTAÇÃO DE SERVIÇOS',
       valorDestaque: `R$ ${valorFmt} (${extenso})`,
       paragrafos: [
@@ -214,7 +243,7 @@ export class DocumentosService {
         'Para clareza e validade do presente recibo, firmo o mesmo após conferência dos dados acima.',
         `Forma de pagamento: ${dto.formaPagamento}\nData de emissão: ${dataExtenso(dto.vigenciaInicio)}\nPeríodo de vigência: ${dto.vigenciaInicio.split('-').reverse().join('/')} a ${dto.vigenciaFim.split('-').reverse().join('/')}`,
       ],
-      assinaturaData: `${dto.cidade}, ${dataExtenso(dto.vigenciaInicio)}.`,
+      assinaturaData: `${localEData(prof.cidade, dto.vigenciaInicio)}.`,
     });
   }
 
@@ -226,10 +255,11 @@ export class DocumentosService {
       .map((p) => p.trim())
       .filter(Boolean);
 
-    return renderizar(this.profissional(dto), {
+    const prof = await this.profissional(dto, user);
+    return renderizar(prof, {
       titulo: dto.titulo.toUpperCase(),
       paragrafos,
-      assinaturaData: `${dto.cidade}, ${dataExtenso(dto.data)}.`,
+      assinaturaData: `${localEData(prof.cidade, dto.data)}.`,
     });
   }
 }

@@ -17,6 +17,10 @@ export interface ModeloDocumento {
   campos: CampoModelo[];
 }
 
+/**
+ * Modelos de documento do painel. O campo `cidade` não traz valor fixo:
+ * em branco, a assinatura usa a cidade do perfil do nutricionista logado.
+ */
 export const MODELOS: ModeloDocumento[] = [
   {
     chave: 'atestado_onutri',
@@ -43,7 +47,13 @@ export const MODELOS: ModeloDocumento[] = [
         obrigatorio: false,
         ajuda: 'Deixe em branco para omitir o parágrafo.',
       },
-      { nome: 'cidade', rotulo: 'Cidade', tipo: 'texto', obrigatorio: true, valorPadrao: 'São Paulo' },
+      {
+        nome: 'cidade',
+        rotulo: 'Cidade',
+        tipo: 'texto',
+        obrigatorio: false,
+        ajuda: 'Em branco usa a cidade do seu perfil.',
+      },
     ],
   },
   {
@@ -77,7 +87,13 @@ export const MODELOS: ModeloDocumento[] = [
       },
       { nome: 'vigenciaInicio', rotulo: 'Início da vigência', tipo: 'data', obrigatorio: true },
       { nome: 'vigenciaFim', rotulo: 'Fim da vigência', tipo: 'data', obrigatorio: true },
-      { nome: 'cidade', rotulo: 'Cidade', tipo: 'texto', obrigatorio: true, valorPadrao: 'São Paulo' },
+      {
+        nome: 'cidade',
+        rotulo: 'Cidade',
+        tipo: 'texto',
+        obrigatorio: false,
+        ajuda: 'Em branco usa a cidade do seu perfil.',
+      },
     ],
   },
   {
@@ -88,7 +104,13 @@ export const MODELOS: ModeloDocumento[] = [
     campos: [
       { nome: 'titulo', rotulo: 'Título do documento', tipo: 'texto', obrigatorio: true },
       { nome: 'corpo', rotulo: 'Conteúdo', tipo: 'textarea', obrigatorio: true },
-      { nome: 'cidade', rotulo: 'Cidade', tipo: 'texto', obrigatorio: true, valorPadrao: 'São Paulo' },
+      {
+        nome: 'cidade',
+        rotulo: 'Cidade',
+        tipo: 'texto',
+        obrigatorio: false,
+        ajuda: 'Em branco usa a cidade do seu perfil.',
+      },
       { nome: 'data', rotulo: 'Data', tipo: 'data', obrigatorio: true },
     ],
   },
