@@ -21,6 +21,9 @@ const APP_TIME_ZONE = 'America/Sao_Paulo';
 const ISO_INSTANT_WITH_TIMEZONE_RE =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/;
 
+/** Teto de duração do DTO — usado também como janela da busca de conflito. */
+const DURACAO_MAX_MIN = 480;
+
 function tzOffsetMs(date: Date, timeZone: string): number {
   const parts = new Intl.DateTimeFormat('en-US', {
     timeZone,
@@ -85,6 +88,15 @@ function defaultRange(): { de: string; ate: string } {
   const end = new Date(now);
   end.setDate(end.getDate() + 60);
   return { de: localYmd(start), ate: localYmd(end) };
+}
+
+function horarioLocal(d: Date): string {
+  return new Intl.DateTimeFormat('pt-BR', {
+    timeZone: APP_TIME_ZONE,
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(d);
 }
 
 function parseIsoInstantOrThrow(value: string): Date {
@@ -167,6 +179,7 @@ export class AgendamentosService {
     inicio: Date;
     observacao: string | null;
     status: string;
+    duracaoMin: number;
     criadoEm: Date;
     atualizadoEm: Date;
     paciente: {
@@ -181,6 +194,7 @@ export class AgendamentosService {
       inicio: row.inicio.toISOString(),
       observacao: row.observacao,
       status: row.status,
+      duracaoMin: row.duracaoMin,
       criadoEm: row.criadoEm.toISOString(),
       atualizadoEm: row.atualizadoEm.toISOString(),
       paciente: {
@@ -192,41 +206,65 @@ export class AgendamentosService {
   }
 
   /**
-   * Impede dois agendamentos no mesmo horário.
+   * Impede dois agendamentos que se sobreponham no tempo.
+   *
+   * Antes comparava apenas o horário de início exato. Com duração variável
+   * isso deixaria passar o pior caso: uma consulta de 90 min às 9h e outra às
+   * 10h, as duas no mesmo consultório. Agora compara intervalos.
    *
    * Duas colisões reais: o profissional em dois lugares ao mesmo tempo, e o
-   * mesmo paciente marcado duas vezes. Ambas passavam batido antes e viravam
-   * problema na recepção, não no sistema.
+   * mesmo paciente marcado duas vezes.
    */
   private async ensureSemConflito(
     inicio: Date,
+    duracaoMin: number,
     idNutricionista: number,
     idPaciente: number,
     ignorarId?: number,
   ): Promise<void> {
-    const existentes = await this.prisma.consultaAgendada.findMany({
+    const fim = new Date(inicio.getTime() + duracaoMin * 60_000);
+
+    // Candidatos: qualquer consulta que comece antes do fim da nova. O limite
+    // inferior (teto de duração) evita varrer o histórico inteiro.
+    const candidatos = await this.prisma.consultaAgendada.findMany({
       where: {
-        inicio,
         status: { not: StatusConsulta.cancelada },
+        inicio: {
+          lt: fim,
+          gte: new Date(inicio.getTime() - DURACAO_MAX_MIN * 60_000),
+        },
         ...(ignorarId != null ? { id: { not: ignorarId } } : {}),
         OR: [{ idNutricionista }, { idPaciente }],
       },
-      select: { id: true, idNutricionista: true, idPaciente: true },
+      select: {
+        id: true,
+        idNutricionista: true,
+        idPaciente: true,
+        inicio: true,
+        duracaoMin: true,
+      },
     });
 
-    const doProfissional = existentes.find(
-      (e) => e.idNutricionista === idNutricionista,
+    // Sobreposição de intervalos: começa antes de o outro terminar E termina
+    // depois de o outro começar.
+    const conflitantes = candidatos.filter((c) => {
+      const cFim = new Date(c.inicio.getTime() + c.duracaoMin * 60_000);
+      return c.inicio < fim && cFim > inicio;
+    });
+
+    const doProfissional = conflitantes.find(
+      (c) => c.idNutricionista === idNutricionista,
     );
     if (doProfissional) {
       throw new ConflictException(
-        'Já existe uma consulta neste horário para você.',
+        `Já existe consulta neste horário para você (a partir das ${horarioLocal(doProfissional.inicio)}).`,
       );
     }
 
-    const doPaciente = existentes.find((e) => e.idPaciente === idPaciente);
+    const doPaciente = conflitantes.find((c) => c.idPaciente === idPaciente);
     if (doPaciente) {
       throw new ConflictException(
-        'Este paciente já tem consulta neste horário.',
+        `Este paciente já tem consulta neste horário (a partir das ${horarioLocal(doPaciente.inicio)}).`,
       );
     }
   }
@@ -264,12 +302,19 @@ export class AgendamentosService {
       user,
     );
     const inicio = parseIsoInstantOrThrow(dto.inicio);
-    await this.ensureSemConflito(inicio, paciente.idNutricionista, paciente.id);
+    const duracaoMin = dto.duracaoMin ?? 60;
+    await this.ensureSemConflito(
+      inicio,
+      duracaoMin,
+      paciente.idNutricionista,
+      paciente.id,
+    );
     const row = await this.prisma.consultaAgendada.create({
       data: {
         idPaciente: paciente.id,
         idNutricionista: paciente.idNutricionista,
         inicio,
+        duracaoMin,
         observacao: dto.observacao?.trim() || null,
       },
       include: {
@@ -286,21 +331,30 @@ export class AgendamentosService {
       inicio?: Date;
       observacao?: string | null;
       status?: 'agendada' | 'realizada' | 'faltou' | 'cancelada';
+      duracaoMin?: number;
     } = {};
-    if (dto.inicio !== undefined) {
-      const d = parseIsoInstantOrThrow(dto.inicio);
-      // Reagendar também precisa checar colisão — é justamente quando ela
-      // costuma acontecer.
-      const mesmoHorario = d.getTime() === atual.inicio.getTime();
-      if (!mesmoHorario) {
-        await this.ensureSemConflito(
-          d,
-          atual.idNutricionista,
-          atual.idPaciente,
-          id,
-        );
-      }
-      data.inicio = d;
+    // Mudar horário OU duração pode criar colisão que antes não existia —
+    // por isso os dois casos passam pela checagem.
+    const mudouInicio = dto.inicio !== undefined;
+    const mudouDuracao = dto.duracaoMin !== undefined;
+
+    if (mudouInicio) {
+      data.inicio = parseIsoInstantOrThrow(dto.inicio as string);
+    }
+    if (mudouDuracao) {
+      data.duracaoMin = dto.duracaoMin;
+    }
+
+    if (mudouInicio || mudouDuracao) {
+      const inicioEfetivo = data.inicio ?? atual.inicio;
+      const duracaoEfetiva = data.duracaoMin ?? atual.duracaoMin;
+      await this.ensureSemConflito(
+        inicioEfetivo,
+        duracaoEfetiva,
+        atual.idNutricionista,
+        atual.idPaciente,
+        id,
+      );
     }
     if (dto.observacao !== undefined) {
       data.observacao = dto.observacao?.trim() || null;
