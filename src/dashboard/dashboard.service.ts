@@ -1,6 +1,7 @@
 import { ForbiddenException, Injectable } from '@nestjs/common';
 import {
   PerfilUsuario,
+  StatusConsulta,
   StatusLancamentoFinanceiro,
   TipoLancamentoFinanceiro,
 } from '@prisma/client';
@@ -203,20 +204,34 @@ export class DashboardService {
       planosPrescritos,
       ultimoCheckinPorPaciente,
       ultimaConsultaPorPaciente,
+      consultasFaltou,
+      consultasCanceladas,
     ] = await Promise.all([
       this.prisma.paciente.count({ where: wherePaciente }),
 
+      // Hoje conta o que está na agenda (realizada ou ainda agendada).
       this.prisma.consultaAgendada.count({
-        where: { ...consultaBase, inicio: { gte: hojeInicio, lte: hojeFim } },
+        where: {
+          ...consultaBase,
+          status: { in: [StatusConsulta.agendada, StatusConsulta.realizada] },
+          inicio: { gte: hojeInicio, lte: hojeFim },
+        },
       }),
 
+      // Só consulta REALIZADA conta como atendimento. Agendamento futuro,
+      // falta e cancelamento não são produção do consultório.
       this.prisma.consultaAgendada.count({
-        where: { ...consultaBase, inicio: { gte: inicio, lte: fim } },
+        where: {
+          ...consultaBase,
+          status: StatusConsulta.realizada,
+          inicio: { gte: inicio, lte: fim },
+        },
       }),
 
       this.prisma.consultaAgendada.count({
         where: {
           ...consultaBase,
+          status: StatusConsulta.realizada,
           inicio: { gte: inicioAnterior, lte: fimAnterior },
         },
       }),
@@ -262,6 +277,22 @@ export class DashboardService {
         by: ['idPaciente'],
         where: consultaBase,
         _max: { inicio: true },
+      }),
+
+      this.prisma.consultaAgendada.count({
+        where: {
+          ...consultaBase,
+          status: StatusConsulta.faltou,
+          inicio: { gte: inicio, lte: fim },
+        },
+      }),
+
+      this.prisma.consultaAgendada.count({
+        where: {
+          ...consultaBase,
+          status: StatusConsulta.cancelada,
+          inicio: { gte: inicio, lte: fim },
+        },
       }),
     ]);
 
@@ -379,6 +410,16 @@ export class DashboardService {
       variacaoConsultas,
       checkinsPendentes: enviosPendentes,
       taxaResposta,
+      // Faltas sobre o total que passou pela agenda (realizadas + faltas).
+      // Cancelamento com antecedência não é falta.
+      taxaFalta:
+        consultasPeriodo + consultasFaltou > 0
+          ? Math.round(
+              (consultasFaltou / (consultasPeriodo + consultasFaltou)) * 100,
+            )
+          : null,
+      consultasFaltou,
+      consultasCanceladas,
       novosPacientes,
       planosPrescritos,
       financeiro: {
@@ -419,6 +460,7 @@ export class DashboardService {
           select: { respondidoEm: true },
         },
         consultasAgendadas: {
+          where: { status: { not: StatusConsulta.cancelada } },
           orderBy: { inicio: 'desc' },
           take: 1,
           select: { inicio: true },
@@ -508,6 +550,7 @@ export class DashboardService {
     const rows = await this.prisma.consultaAgendada.findMany({
       where: {
         ...this.whereConsulta(user),
+        status: { not: StatusConsulta.cancelada },
         inicio: { gte: dayStart(), lte: dayEnd() },
       },
       include: {
