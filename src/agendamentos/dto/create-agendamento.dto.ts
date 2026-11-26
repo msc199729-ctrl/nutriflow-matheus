@@ -4,6 +4,7 @@ import {
   IsInt,
   IsOptional,
   IsString,
+  Max,
   MaxLength,
   Min,
 } from 'class-validator';
@@ -21,6 +22,20 @@ export class CreateAgendamentoDto {
   })
   @IsDateString()
   inicio!: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Duração da consulta em minutos. Quem decide é o nutricionista no momento de agendar.',
+    example: 60,
+    default: 60,
+    minimum: 10,
+    maximum: 480,
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(10)
+  @Max(480)
+  duracaoMin?: number;
 
   @ApiPropertyOptional({ description: 'Observações' })
   @IsOptional()

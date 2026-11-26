@@ -1,5 +1,14 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsDateString, IsIn, IsOptional, IsString, MaxLength } from 'class-validator';
+import {
+  IsDateString,
+  IsIn,
+  IsInt,
+  IsOptional,
+  IsString,
+  Max,
+  MaxLength,
+  Min,
+} from 'class-validator';
 
 export const STATUS_CONSULTA = ['agendada', 'realizada', 'faltou', 'cancelada'] as const;
 
@@ -10,6 +19,18 @@ export class UpdateAgendamentoDto {
   @IsOptional()
   @IsDateString()
   inicio?: string;
+
+  @ApiPropertyOptional({
+    description: 'Duração em minutos (10 a 480).',
+    example: 60,
+    minimum: 10,
+    maximum: 480,
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(10)
+  @Max(480)
+  duracaoMin?: number;
 
   @ApiPropertyOptional()
   @IsOptional()
