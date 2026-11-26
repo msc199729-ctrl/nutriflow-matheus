@@ -1,5 +1,6 @@
 import {
   Body,
+  Header,
   Controller,
   Delete,
   Get,
@@ -24,30 +25,49 @@ export class FinanceiroController {
   constructor(private readonly financeiroService: FinanceiroService) {}
 
   @Get('lancamentos')
-  @ApiResponse({ status: 200, description: 'Lista de lançamentos financeiros' })
+  @ApiQuery({ name: 'mes', required: false, description: 'YYYY-MM' })
+  @ApiQuery({ name: 'tipo', required: false })
+  @ApiQuery({ name: 'status', required: false })
+  @ApiQuery({ name: 'busca', required: false })
+  @ApiResponse({ status: 200, description: 'Lançamentos do período (status já derivado)' })
   list(
-    @Query() query: QueryLancamentosFinanceirosDto,
     @CurrentUser() user: JwtPayloadUser,
+    @Query() query: QueryLancamentosFinanceirosDto,
   ) {
     return this.financeiroService.list(user, query);
   }
 
-  @Get('resumo')
-  @ApiQuery({ name: 'mes', required: false, description: 'Mês no formato YYYY-MM' })
-  @ApiResponse({ status: 200, description: 'Resumo financeiro mensal' })
-  resumo(
-    @Query('mes') mes: string | undefined,
+  /**
+   * CSV do período filtrado. Precisa vir antes de `lancamentos/:id` para não
+   * ser capturada como id.
+   */
+  @Get('lancamentos/exportar')
+  @ApiResponse({ status: 200, description: 'CSV do período filtrado' })
+  @Header('Content-Type', 'text/csv; charset=utf-8')
+  @Header('Content-Disposition', 'attachment; filename="financeiro.csv"')
+  exportar(
     @CurrentUser() user: JwtPayloadUser,
+    @Query() query: QueryLancamentosFinanceirosDto,
+  ) {
+    return this.financeiroService.exportarCsv(user, query);
+  }
+
+  @Get('resumo')
+  @ApiQuery({ name: 'mes', required: false, description: 'YYYY-MM' })
+  @ApiResponse({ status: 200, description: 'Totais, próximos vencimentos e fluxo de 6 meses' })
+  resumo(
+    @CurrentUser() user: JwtPayloadUser,
+    @Query('mes') mes?: string,
   ) {
     return this.financeiroService.resumo(user, mes);
   }
 
   @Post('gerar-mensalidades')
-  @ApiQuery({ name: 'mes', required: false, description: 'Competência YYYY-MM' })
-  @ApiResponse({ status: 200, description: 'Geração idempotente de mensalidades' })
+  @ApiQuery({ name: 'mes', required: false, description: 'YYYY-MM' })
+  @ApiResponse({ status: 201, description: 'Mensalidades geradas para a competência' })
   gerarMensalidades(
-    @Query('mes') mes: string | undefined,
     @CurrentUser() user: JwtPayloadUser,
+    @Query('mes') mes?: string,
   ) {
     return this.financeiroService.gerarMensalidades(user, mes);
   }
@@ -55,8 +75,8 @@ export class FinanceiroController {
   @Post('lancamentos')
   @ApiResponse({ status: 201, description: 'Lançamento criado' })
   create(
-    @Body() dto: CreateLancamentoFinanceiroDto,
     @CurrentUser() user: JwtPayloadUser,
+    @Body() dto: CreateLancamentoFinanceiroDto,
   ) {
     return this.financeiroService.create(user, dto);
   }
@@ -65,8 +85,8 @@ export class FinanceiroController {
   @ApiResponse({ status: 200, description: 'Lançamento atualizado' })
   update(
     @Param('id', ParseIntPipe) id: number,
-    @Body() dto: UpdateLancamentoFinanceiroDto,
     @CurrentUser() user: JwtPayloadUser,
+    @Body() dto: UpdateLancamentoFinanceiroDto,
   ) {
     return this.financeiroService.update(id, user, dto);
   }
