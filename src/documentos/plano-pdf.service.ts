@@ -1,18 +1,30 @@
 /**
- * PDF timbrado do plano alimentar — entrega ao paciente.
+ * PDF do plano alimentar — versão completa para entrega ao paciente.
  *
- * Rota (registrada no DocumentosController):
- *   GET /documentos/plano-alimentar/:idPlano/pdf   -> PDF inline
+ * Rota (DocumentosController):
+ *   GET /documentos/plano-alimentar/:idPlano/pdf
  *
- * Design (v2): faixa de topo full-bleed azul-marinho com nome/CRN em branco,
- * linha de acento teal, título do documento com chip de vigência, refeições
- * com faixa de título (borda esquerda teal + horário à direita), tabela com
- * zebra sutil, hidratação em destaque, bloco de assinatura e paginação.
- * Segue Res. CFN 599/2018 + 856/2026: sem promessa de resultado; é a
- * PRESCRIÇÃO, não material de divulgação.
+ * Estrutura (inspirada no que o WebDiet faz bem, com o que ele faz mal resolvido):
  *
- * Logo: placeholder — quando o arquivo existir em assets/logo.png,
- * descomentar o bloco LOGO em desenharTopo().
+ *  1. RESUMO — calorias e macros do dia em 4 caixas + "Como usar este plano"
+ *     (o WebDiet não explica nada; o paciente fica sem saber o que é substituto)
+ *     + timeline das refeições com kcal e macros de cada uma
+ *     + hidratação com equivalência em copos.
+ *
+ *  2. PLANEJAMENTO — uma seção por refeição: faixa de título com horário,
+ *     itens com medida caseira à direita, substitutos indentados com "ou"
+ *     (no WebDiet eles aparecem como lista solta abaixo, parecendo item extra),
+ *     e rodapé com os macros da refeição.
+ *
+ *  3. MICRONUTRIENTES — grade de cards com valor, barra e % da DRI do paciente,
+ *     com legenda de cores ANTES da grade (no WebDiet são 25 números sem
+ *     referência nenhuma — o paciente não sabe se 1144 mg de cálcio é bom).
+ *
+ *  4. LISTA DE COMPRAS — agrupada por categoria, com checkbox, quantidade
+ *     total do período e alternativas marcadas com "ou".
+ *
+ * Compliance CFN (Res. 599/2018 e 856/2026): é a prescrição, não material de
+ * divulgação — sem promessa de resultado, sem antes/depois.
  */
 
 import { Injectable, NotFoundException } from '@nestjs/common';
@@ -21,21 +33,36 @@ import { PrismaService } from '../prisma/prisma.service';
 import { PROFISSIONAL_PADRAO } from './documentos.config';
 import type { JwtPayloadUser } from '../common/decorators/current-user.decorator';
 import { PacientesService } from '../pacientes/pacientes.service';
+import {
+  agregarNutrientes,
+  NUTRIENTES,
+  type AlimentoNutrientes,
+  type ContextoDri,
+  type ItemPlano,
+} from '../micronutrientes/micronutrientes';
 
-const LARGEMA4 = 595.28; // pt
-const ALTURA_A4 = 841.89; // pt
-const MARGEM_ESQ = 52;
-const MARGEM_DIR = 52;
-const MARGEM_SUP = 150; // abaixo da faixa de topo
-const MARGEM_INF = 64;
-const LARGEM_UTIL = LARGEMA4 - MARGEM_ESQ - MARGEM_DIR;
+// ── Geometria ────────────────────────────────────────────────────────
+const W = 595.28;
+const H = 841.89;
+const ME = 48;
+const MD = 48;
+const MSUP = 132;      // abaixo da faixa de topo (1ª página)
+const MSUP_CONT = 96;  // páginas seguintes
+const MINF = 62;
+const UTIL = W - ME - MD;
 
-// Paleta
-const AZUL = '#1e3a5f';        // marinho — timbre e títulos
-const AZUL_CLARO = '#eef3f8';  // fundo de faixa de refeição e zebra
-const TEAL = '#0d9488';        // acento
-const TEXTO = '#1f2937';
-const TEXTO_SUAVE = '#6b7280';
+// ── Paleta ───────────────────────────────────────────────────────────
+const AZUL = '#123a63';
+const AZUL_MED = '#2b5b8c';
+const AZUL_CLARO = '#eaf1f8';
+const TEAL = '#0f9488';
+const TEAL_CLARO = '#e6f5f3';
+const TEXTO = '#1b2430';
+const SUAVE = '#6b7785';
+const LINHA = '#e3e8ee';
+const AMBAR = '#b45309';
+const VERDE = '#15803d';
+const VERMELHO = '#b91c1c';
 
 const MESES = [
   'janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho',
@@ -47,63 +74,120 @@ function dataExtenso(d: Date): string {
 }
 
 function dataCurta(d: Date | null): string {
-  if (!d) return '';
-  return d.toLocaleDateString('pt-BR');
+  return d ? d.toLocaleDateString('pt-BR') : '';
 }
 
-function hora(h: Date | null): string {
+function horaDe(h: Date | null): string {
   if (!h) return '';
   return h.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 }
 
-function fmtG(v: number | null | undefined): string {
-  if (v == null || !Number.isFinite(v) || v <= 0) return '';
-  const r = Math.round(v * 10) / 10;
-  return Number.isInteger(r) ? String(r) : r.toFixed(1).replace('.', ',');
+function n1(v: number | null | undefined): number {
+  if (v == null || !Number.isFinite(v)) return 0;
+  return Math.round(v * 10) / 10;
 }
 
-/** Medida caseira do item: prioriza a medida cadastrada, senão a string antiga. */
-function medidaDoItem(item: {
+/** Número no padrão brasileiro, sem zeros inúteis. */
+function fmt(v: number | null | undefined, casas = 1): string {
+  const n = n1(v);
+  if (Number.isInteger(n)) return String(n);
+  return n.toFixed(casas).replace('.', ',');
+}
+
+interface ItemPdf {
+  nome: string;
+  medida: string;
+  gramas: number;
+  aVontade: boolean;
+  substitutos: Array<{ nome: string; medida: string }>;
+}
+
+interface RefeicaoPdf {
+  nome: string;
+  horario: string;
+  itens: ItemPdf[];
+  kcal: number;
+  ptn: number;
+  cho: number;
+  lip: number;
+}
+
+interface CompraItem {
+  nome: string;
+  quantidade: string;
+  alternativas: string[];
+}
+
+interface CompraGrupo {
+  categoria: string;
+  itens: CompraItem[];
+}
+
+interface DadosPdf {
+  paciente: string;
+  nomePlano: string;
+  tipoPlano: string;
+  vigencia: string;
+  metaAgua: number;
+  refeicoes: RefeicaoPdf[];
+  totais: { kcal: number; ptn: number; cho: number; lip: number };
+  micros: Array<{ rotulo: string; valor: string; percentual: number }>;
+  compras: CompraGrupo[];
+  /** true quando algum alimento do plano não tem micronutrientes */
+  microsIncompletos: boolean;
+}
+
+/** Medida caseira legível: "3 unidades", "2 fatias", senão gramas. */
+function medidaLegivel(item: {
   medidaRef?: { nome: string } | null;
   medidaCaseira?: string | null;
   quantidadeMedida?: number | null;
   quantidadeGramas?: number | null;
+  aVontade?: boolean;
 }): string {
+  if (item.aVontade) return 'à vontade';
   const qtd = item.quantidadeMedida;
   if (item.medidaRef?.nome && qtd && qtd > 0) {
-    const nome = item.medidaRef.nome.toLowerCase();
-    const plural = qtd > 1 && !nome.endsWith('s') ? `${item.medidaRef.nome}s` : item.medidaRef.nome;
-    return `${fmtG(qtd)} ${plural}`;
+    const nome = item.medidaRef.nome;
+    const plural = qtd > 1 && !nome.toLowerCase().endsWith('s') ? `${nome}s` : nome;
+    return `${fmt(qtd)} ${plural}`;
   }
-  if (item.medidaCaseira?.trim() && item.quantidadeGramas && item.quantidadeGramas > 0) {
-    return item.medidaCaseira.trim();
-  }
-  const g = fmtG(item.quantidadeGramas);
-  return g ? `${g} g` : 'à vontade';
+  if (item.medidaCaseira?.trim()) return item.medidaCaseira.trim();
+  const g = n1(item.quantidadeGramas);
+  return g > 0 ? `${fmt(g)} g` : 'à vontade';
 }
 
-interface LinhaItem {
-  nome: string;
-  medida: string;
-  substitutos: string[];
+/** Categoria amigável da lista de compras a partir da classe da TBCA. */
+const CATEGORIAS: Array<{ teste: RegExp; rotulo: string }> = [
+  { teste: /carne|ave|pescado|peixe|fruto do mar|ovo/i, rotulo: 'Proteínas' },
+  { teste: /cereal|gr[aã]o|tub[eé]rculo|raiz|p[aã]o|massa/i, rotulo: 'Cereais e tubérculos' },
+  { teste: /leite|derivado|queijo|iogurte|laticínio/i, rotulo: 'Leite e derivados' },
+  { teste: /fruta/i, rotulo: 'Frutas' },
+  { teste: /vegetal|legume|verdura|hortali/i, rotulo: 'Vegetais' },
+  { teste: /leguminosa/i, rotulo: 'Leguminosas' },
+  { teste: /g[oó]rdur|oleaginos|semente|castanha|azeite|[oó]leo/i, rotulo: 'Gorduras e sementes' },
+  { teste: /bebida|suco|ch[aá]|caf[eé]/i, rotulo: 'Bebidas' },
+  { teste: /a[cç][uú]car|doce|mel|sobremesa/i, rotulo: 'Açúcares e doces' },
+];
+
+function categoriaDe(classe: string | null): string {
+  if (!classe) return 'Outros';
+  for (const c of CATEGORIAS) if (c.teste.test(classe)) return c.rotulo;
+  return 'Outros';
 }
 
-interface Refeicao {
-  nome: string;
-  horario: string;
-  itens: LinhaItem[];
-}
-
-interface DadosPlano {
-  nomePlano: string;
-  paciente: string;
-  tipoPlano: string;
-  descricaoQualitativa: string | null;
-  dataInicio: Date | null;
-  dataFim: Date | null;
-  metaAguaLitros: number | null;
-  refeicoes: Refeicao[];
-}
+const ORDEM_CATEGORIAS = [
+  'Proteínas',
+  'Cereais e tubérculos',
+  'Leguminosas',
+  'Vegetais',
+  'Frutas',
+  'Leite e derivados',
+  'Gorduras e sementes',
+  'Bebidas',
+  'Açúcares e doces',
+  'Outros',
+];
 
 @Injectable()
 export class PlanoPdfService {
@@ -112,7 +196,9 @@ export class PlanoPdfService {
     private readonly pacientesService: PacientesService,
   ) {}
 
-  async carregarPlano(idPlano: number, user: JwtPayloadUser): Promise<DadosPlano> {
+  // ═══════════════════ DADOS ═══════════════════
+
+  async carregar(idPlano: number, user: JwtPayloadUser): Promise<DadosPdf> {
     const plano = await this.prisma.planoAlimentar.findUnique({
       where: { id: idPlano },
       select: {
@@ -124,7 +210,7 @@ export class PlanoPdfService {
         dataFim: true,
         metaAguaLitros: true,
         idPaciente: true,
-        paciente: { select: { nome: true } },
+        paciente: { select: { nome: true, dataNascimento: true, genero: true } },
         refeicoesPlanejadas: {
           orderBy: { horarioSugerido: 'asc' },
           select: {
@@ -133,13 +219,31 @@ export class PlanoPdfService {
             itensDieta: {
               orderBy: { id: 'asc' },
               select: {
+                idAlimento: true,
                 quantidadeGramas: true,
                 medidaCaseira: true,
-                idMedidaCaseira: true,
                 quantidadeMedida: true,
                 aVontade: true,
                 medidaRef: { select: { nome: true } },
-                alimento: { select: { nome: true, nomeExibicao: true } },
+                alimento: {
+                  select: {
+                    id: true,
+                    nome: true,
+                    nomeExibicao: true,
+                    classeTbca: true,
+                    calorias: true,
+                    proteinas: true,
+                    carboidratos: true,
+                    gorduras: true,
+                    calcio: true, ferro: true, magnesio: true, fosforo: true,
+                    potassio: true, zinco: true, cobre: true, selenio: true,
+                    vitaminaARae: true, vitaminaC: true, vitaminaD: true, vitaminaE: true,
+                    tiamina: true, vitaminaB2: true, vitaminaB3: true, vitaminaB6: true,
+                    vitaminaB12: true, folato: true,
+                    gorduraSaturada: true, gorduraMonoinsaturada: true,
+                    gorduraPoliinsaturada: true, gorduraTrans: true, colesterol: true,
+                  },
+                },
                 substitutos: {
                   orderBy: { ordem: 'asc' },
                   select: {
@@ -153,234 +257,587 @@ export class PlanoPdfService {
         },
       },
     });
+
     if (!plano) throw new NotFoundException('Plano não encontrado');
     await this.pacientesService.findOne(plano.idPaciente, user);
 
-    const refeicoes: Refeicao[] = plano.refeicoesPlanejadas.map((r) => ({
-      nome: r.nome ?? 'Refeição',
-      horario: hora(r.horarioSugerido),
-      itens: r.itensDieta.map((it) => ({
-        nome: it.alimento.nomeExibicao || it.alimento.nome,
-        medida: it.aVontade ? 'à vontade' : medidaDoItem(it),
-        substitutos: (it.substitutos ?? []).map((s) => {
-          const g = fmtG(s.quantidadeGramas);
-          const n = s.alimento.nomeExibicao || s.alimento.nome;
-          return g ? `${n} (${g} g)` : n;
-        }),
-      })),
+    // ── Refeições, macros e itens ──
+    const refeicoes: RefeicaoPdf[] = [];
+    const itensMicro: ItemPlano[] = [];
+    const alimentosMicro = new Map<number, AlimentoNutrientes>();
+    const comprasMap = new Map<
+      string,
+      Map<string, { gramas: number; aVontade: boolean; alternativas: Set<string> }>
+    >();
+
+    for (const ref of plano.refeicoesPlanejadas) {
+      const r: RefeicaoPdf = {
+        nome: ref.nome ?? 'Refeição',
+        horario: horaDe(ref.horarioSugerido),
+        itens: [],
+        kcal: 0, ptn: 0, cho: 0, lip: 0,
+      };
+
+      for (const it of ref.itensDieta) {
+        const a = it.alimento;
+        const g = n1(it.quantidadeGramas);
+        const fator = g / 100;
+
+        r.itens.push({
+          nome: a.nomeExibicao || a.nome,
+          medida: medidaLegivel(it),
+          gramas: g,
+          aVontade: it.aVontade,
+          substitutos: (it.substitutos ?? []).map((s) => ({
+            nome: s.alimento.nomeExibicao || s.alimento.nome,
+            medida: medidaLegivel({ quantidadeGramas: s.quantidadeGramas }),
+          })),
+        });
+
+        // Macros: só os itens principais (o paciente consome uma opção por vez)
+        if (!it.aVontade && g > 0) {
+          r.kcal += (a.calorias ?? 0) * fator;
+          r.ptn += (a.proteinas ?? 0) * fator;
+          r.cho += (a.carboidratos ?? 0) * fator;
+          r.lip += (a.gorduras ?? 0) * fator;
+        }
+
+        // Micronutrientes
+        itensMicro.push({
+          idAlimento: it.idAlimento,
+          quantidadeGramas: g,
+          aVontade: it.aVontade,
+        });
+        if (!alimentosMicro.has(a.id)) {
+          const micros: Record<string, number | null> = {};
+          for (const def of NUTRIENTES) {
+            const v = (a as unknown as Record<string, unknown>)[def.campoPrisma];
+            micros[def.chave] = typeof v === 'number' ? v : null;
+          }
+          alimentosMicro.set(a.id, {
+            id: a.id,
+            nome: a.nome,
+            nomeExibicao: a.nomeExibicao,
+            calorias: a.calorias,
+            micros,
+          });
+        }
+
+        // Lista de compras: quantidade total do período
+        const cat = categoriaDe(a.classeTbca);
+        if (!comprasMap.has(cat)) comprasMap.set(cat, new Map());
+        const grupo = comprasMap.get(cat)!;
+        const chave = (a.nomeExibicao || a.nome).trim();
+        const existente = grupo.get(chave) ?? {
+          gramas: 0,
+          aVontade: false,
+          alternativas: new Set<string>(),
+        };
+        existente.gramas += g;
+        if (it.aVontade) existente.aVontade = true;
+        for (const s of it.substitutos ?? []) {
+          existente.alternativas.add(
+            `${s.alimento.nomeExibicao || s.alimento.nome} ${fmt(s.quantidadeGramas)} g`,
+          );
+        }
+        grupo.set(chave, existente);
+      }
+
+      r.kcal = Math.round(r.kcal);
+      r.ptn = n1(r.ptn);
+      r.cho = n1(r.cho);
+      r.lip = n1(r.lip);
+      refeicoes.push(r);
+    }
+
+    const totais = {
+      kcal: refeicoes.reduce((s, r) => s + r.kcal, 0),
+      ptn: n1(refeicoes.reduce((s, r) => s + r.ptn, 0)),
+      cho: n1(refeicoes.reduce((s, r) => s + r.cho, 0)),
+      lip: n1(refeicoes.reduce((s, r) => s + r.lip, 0)),
+    };
+
+    // ── Micronutrientes contra a DRI do paciente ──
+    const ctx: ContextoDri = {
+      sexo: String(plano.paciente.genero ?? '').toUpperCase().startsWith('F') ? 'F' : 'M',
+      idadeAnos: idadeEmAnos(plano.paciente.dataNascimento),
+    };
+    const resultadoMicro = agregarNutrientes(itensMicro, alimentosMicro, ctx);
+    const micros = resultadoMicro.totais.map((t) => ({
+      rotulo: t.rotulo,
+      valor: `${fmt(t.prescrito)} ${t.unidade}`,
+      percentual: t.percentual ?? 0,
     }));
 
+    // ── Lista de compras ──
+    const compras: CompraGrupo[] = [];
+    for (const cat of ORDEM_CATEGORIAS) {
+      const grupo = comprasMap.get(cat);
+      if (!grupo || grupo.size === 0) continue;
+      const itens: CompraItem[] = [...grupo.entries()]
+        .sort((a, b) => a[0].localeCompare(b[0], 'pt-BR'))
+        .map(([nome, v]) => ({
+          nome,
+          quantidade: v.aVontade
+            ? 'à vontade'
+            : v.gramas >= 1000
+              ? `${fmt(v.gramas / 1000, 2)} kg`
+              : `${Math.round(v.gramas)} g`,
+          alternativas: [...v.alternativas],
+        }));
+      compras.push({ categoria: cat, itens });
+    }
+
+    const vigencia =
+      plano.dataInicio
+        ? `${dataCurta(plano.dataInicio)}${plano.dataFim ? ` – ${dataCurta(plano.dataFim)}` : ''}`
+        : '';
+
     return {
-      nomePlano: plano.nome ?? `Plano alimentar #${plano.id}`,
       paciente: plano.paciente.nome?.trim() || 'Paciente',
+      nomePlano: plano.nome ?? `Plano alimentar #${plano.id}`,
       tipoPlano: plano.tipoPlano === 'QUALITATIVO' ? 'Qualitativo' : 'Por alimentos',
-      descricaoQualitativa: plano.descricaoQualitativa,
-      dataInicio: plano.dataInicio,
-      dataFim: plano.dataFim,
-      metaAguaLitros: plano.metaAguaLitros,
+      vigencia,
+      metaAgua: n1(plano.metaAguaLitros),
       refeicoes,
+      totais,
+      micros,
+      compras,
+      microsIncompletos: resultadoMicro.cobertura.alimentosSemDados.length > 0,
     };
   }
 
-  /** Faixa de topo full-bleed, desenhada em TODAS as páginas. */
-  private desenharTopo(doc: PDFKit.PDFDocument, pagina1: boolean): void {
-    const prof = PROFISSIONAL_PADRAO;
-    const alturaFaixa = pagina1 ? 108 : 84;
+  // ═══════════════════ RENDER ═══════════════════
 
-    doc.save();
-    doc.rect(0, 0, LARGEMA4, alturaFaixa).fill(AZUL);
-    doc.rect(0, alturaFaixa, LARGEMA4, 4).fill(pagina1 ? TEAL : AZUL);
-    doc.restore();
-
-    // LOGO: quando houver o arquivo, descomentar:
-    // doc.image('assets/logo.png', MARGEM_ESQ, 26, { height: 56 });
-
-    doc.fillColor('#ffffff');
-    doc.font('Helvetica-Bold').fontSize(15)
-      .text('NUTRICIONISTA MATHEUS S CARVALHO', 0, pagina1 ? 34 : 26, {
-        align: 'center', width: LARGEMA4,
-      });
-    doc.font('Helvetica').fontSize(9.5).fillColor('#c7d5e8')
-      .text('Nutrição Clínica Esportiva', { align: 'center', width: LARGEMA4 });
-    doc.font('Helvetica').fontSize(8.5).fillColor('#9fb3cc')
-      .text(`CRN ${prof.conselhoNumero}`, { align: 'center', width: LARGEMA4 });
-  }
-
-  gerar(dados: DadosPlano): PDFKit.PDFDocument {
+  gerar(d: DadosPdf): PDFKit.PDFDocument {
     const prof = PROFISSIONAL_PADRAO;
     const doc = new PDFDocument({
       size: 'A4',
-      margins: { top: MARGEM_SUP, bottom: MARGEM_INF, left: MARGEM_ESQ, right: MARGEM_DIR },
-      info: { Title: `Plano alimentar — ${dados.paciente}` },
+      margins: { top: MSUP, bottom: MINF, left: ME, right: MD },
+      bufferPages: true,
+      info: { Title: `Plano alimentar — ${d.paciente}` },
     });
 
-    // ── Faixa de topo (página 1) ──────────────────────────────────────
-    this.desenharTopo(doc, true);
+    // ── helpers que dependem do doc ──
+    const topo = (pagina1: boolean) => {
+      const alt = pagina1 ? 96 : 62;
+      doc.save();
+      doc.rect(0, 0, W, alt).fill(AZUL);
+      doc.rect(0, alt, W, 3.5).fill(pagina1 ? TEAL : AZUL_MED);
+      doc.restore();
 
-    // ── Título do documento ───────────────────────────────────────────
-    doc.font('Helvetica-Bold').fontSize(20).fillColor(TEXTO)
-      .text('Plano Alimentar', MARGEM_ESQ, MARGEM_SUP, { width: LARGEM_UTIL });
-    doc.font('Helvetica').fontSize(10.5).fillColor(TEXTO_SUAVE)
-      .text(`Preparado para ${dados.paciente}`, MARGEM_ESQ, doc.y + 4, { width: LARGEM_UTIL });
-    doc.moveDown(0.8);
-
-    // chip: nome do plano · tipo · vigência
-    const vigencia = dados.dataInicio
-      ? `${dataCurta(dados.dataInicio)}${dados.dataFim ? ` – ${dataCurta(dados.dataFim)}` : ''}`
-      : null;
-    const chip = [dados.nomePlano, dados.tipoPlano, vigencia].filter(Boolean).join('   ·   ');
-    if (chip) {
-      doc.font('Helvetica').fontSize(9);
-      const larguraChip = doc.widthOfString(chip) + 24;
-      const yChip = doc.y;
-      doc.roundedRect(MARGEM_ESQ, yChip, Math.min(larguraChip, LARGEM_UTIL), 22, 11)
-        .fill(AZUL_CLARO);
-      doc.font('Helvetica').fontSize(9).fillColor(AZUL)
-        .text(chip, MARGEM_ESQ + 12, yChip + 6.5, { width: LARGEM_UTIL - 24 });
-      doc.y = yChip + 22;
-    }
-    doc.moveDown(1.2);
-
-    // ── Corpo ─────────────────────────────────────────────────────────
-    if (dados.tipoPlano === 'Qualitativo' && dados.descricaoQualitativa?.trim()) {
-      doc.font('Helvetica-Bold').fontSize(11).fillColor(TEXTO)
-        .text('Orientações gerais');
-      doc.moveDown(0.4);
-      doc.font('Helvetica').fontSize(10).fillColor(TEXTO)
-        .text(dados.descricaoQualitativa.trim(), { align: 'justify', lineGap: 3 });
-      doc.moveDown(1.2);
-    }
-
-    for (const ref of dados.refeicoes) {
-      // Quebra de página antes da refeição se não couber o título + 1 item
-      if (doc.y > ALTURA_A4 - MARGEM_INF - 130) {
-        doc.addPage();
-        this.desenharTopo(doc, false);
-        doc.y = MARGEM_SUP - 30;
-      }
-
-      // ── Faixa de título da refeição ──
-      const yFaixa = doc.y;
-      const alturaFaixa = 26;
-      doc.rect(MARGEM_ESQ, yFaixa, LARGEM_UTIL, alturaFaixa).fill(AZUL_CLARO);
-      doc.rect(MARGEM_ESQ, yFaixa, 4, alturaFaixa).fill(TEAL);
-      doc.font('Helvetica-Bold').fontSize(11).fillColor(AZUL)
-        .text(ref.nome.toUpperCase(), MARGEM_ESQ + 14, yFaixa + 7.5, {
-          width: LARGEM_UTIL - 120,
+      doc.fillColor('#ffffff');
+      doc.font('Helvetica-Bold').fontSize(pagina1 ? 15 : 11.5)
+        .text((prof.nome ?? '').toUpperCase(), 0, pagina1 ? 26 : 18, {
+          align: 'center', width: W,
         });
-      if (ref.horario) {
-        doc.font('Helvetica-Bold').fontSize(10).fillColor(TEAL)
-          .text(ref.horario, MARGEM_ESQ + LARGEM_UTIL - 90, yFaixa + 8, {
-            width: 76, align: 'right',
+      if (pagina1) {
+        doc.font('Helvetica').fontSize(9.5).fillColor('#bed0e4')
+          .text(prof.especialidade, { align: 'center', width: W });
+        doc.font('Helvetica').fontSize(8.5).fillColor('#93aac6')
+          .text(`${prof.conselhoTipo} ${prof.conselhoNumero}`, { align: 'center', width: W });
+      } else {
+        doc.font('Helvetica').fontSize(8).fillColor('#93aac6')
+          .text(`${prof.conselhoTipo} ${prof.conselhoNumero}  ·  ${d.paciente}`, {
+            align: 'center', width: W,
           });
       }
-      doc.y = yFaixa + alturaFaixa + 8;
+    };
 
-      // ── Itens ──
-      let zebra = false;
-      for (const it of ref.itens) {
-        doc.font('Helvetica').fontSize(10);
-        const nomeAltura = Math.max(
-          1,
-          Math.ceil(doc.widthOfString(it.nome) / (LARGEM_UTIL - 170)),
+    const novaPagina = (comTitulo?: string) => {
+      doc.addPage();
+      topo(false);
+      doc.y = MSUP_CONT;
+      doc.x = ME;
+      if (comTitulo) {
+        doc.font('Helvetica-Bold').fontSize(13).fillColor(AZUL)
+          .text(comTitulo, ME, doc.y, { width: UTIL });
+        doc.moveDown(0.9);
+      }
+    };
+
+    // ══════════ 1. RESUMO ══════════
+    topo(true);
+
+    doc.font('Helvetica-Bold').fontSize(21).fillColor(TEXTO)
+      .text('Plano Alimentar', ME, MSUP, { width: UTIL });
+    doc.font('Helvetica').fontSize(10.5).fillColor(SUAVE)
+      .text(`Preparado para ${d.paciente}`, ME, doc.y + 3, { width: UTIL });
+    doc.moveDown(0.7);
+
+    // chips
+    const chips = [d.nomePlano, d.tipoPlano, d.vigencia].filter(Boolean);
+    let cx = ME;
+    const yChips = doc.y;
+    doc.font('Helvetica').fontSize(8.5);
+    for (const c of chips) {
+      const l = doc.widthOfString(c) + 20;
+      if (cx + l > ME + UTIL) break;
+      doc.roundedRect(cx, yChips, l, 20, 10).fill(AZUL_CLARO);
+      doc.fillColor(AZUL_MED)
+        .text(c, cx + 10, yChips + 6, { width: l - 20, lineBreak: false });
+      cx += l + 6;
+    }
+    doc.y = yChips + 30;
+    doc.x = ME;
+
+    // caixas de resumo
+    const boxW = (UTIL - 18) / 4;
+    const boxH = 54;
+    const yBox = doc.y;
+    const caixas = [
+      { rot: 'CALORIAS / DIA', val: String(d.totais.kcal), uni: 'kcal' },
+      { rot: 'PROTEÍNAS', val: fmt(d.totais.ptn), uni: 'g' },
+      { rot: 'CARBOIDRATOS', val: fmt(d.totais.cho), uni: 'g' },
+      { rot: 'GORDURAS', val: fmt(d.totais.lip), uni: 'g' },
+    ];
+    caixas.forEach((c, i) => {
+      const x = ME + i * (boxW + 6);
+      doc.roundedRect(x, yBox, boxW, boxH, 7).fill(AZUL_CLARO);
+      doc.font('Helvetica').fontSize(6.5).fillColor(AZUL_MED)
+        .text(c.rot, x, yBox + 9, { width: boxW, align: 'center' });
+      doc.font('Helvetica-Bold').fontSize(17).fillColor(AZUL)
+        .text(c.val, x, yBox + 20, { width: boxW, align: 'center' });
+      doc.font('Helvetica').fontSize(7.5).fillColor(SUAVE)
+        .text(c.uni, x, yBox + 40, { width: boxW, align: 'center' });
+    });
+    doc.y = yBox + boxH + 16;
+    doc.x = ME;
+
+    // como usar
+    const instrucoes = [
+      'Em cada refeição, escolha UMA opção: o item principal ou uma das alternativas marcadas com “ou”.',
+      'Os horários são uma referência — ajuste conforme sua rotina, mantendo a ordem das refeições.',
+      'As quantidades em gramas servem para conferir; no dia a dia, use a medida caseira.',
+    ];
+    doc.font('Helvetica').fontSize(8.5);
+    let alturaComo = 26;
+    for (const l of instrucoes) {
+      alturaComo += doc.heightOfString(l, { width: UTIL - 40 }) + 3;
+    }
+    const yComo = doc.y;
+    doc.roundedRect(ME, yComo, UTIL, alturaComo, 7).fill(TEAL_CLARO);
+    doc.font('Helvetica-Bold').fontSize(9).fillColor(TEAL)
+      .text('Como usar este plano', ME + 14, yComo + 9, { width: UTIL - 28 });
+    let yL = yComo + 22;
+    for (const l of instrucoes) {
+      doc.font('Helvetica').fontSize(8.5).fillColor(TEAL).text('•', ME + 14, yL, { width: 8 });
+      doc.fillColor('#134e4a').text(l, ME + 24, yL, { width: UTIL - 40 });
+      yL = doc.y + 3;
+    }
+    doc.y = yComo + alturaComo + 16;
+    doc.x = ME;
+
+    // timeline
+    doc.font('Helvetica-Bold').fontSize(9).fillColor(SUAVE)
+      .text('SUAS REFEIÇÕES', ME, doc.y, { width: UTIL, characterSpacing: 0.6 });
+    doc.moveDown(0.6);
+
+    for (const r of d.refeicoes) {
+      if (doc.y > H - MINF - 44) novaPagina();
+      const yy = doc.y;
+      doc.roundedRect(ME, yy, UTIL, 30, 6).fill('#f7f9fc');
+      doc.rect(ME, yy, 3, 30).fill(TEAL);
+      doc.font('Helvetica-Bold').fontSize(10).fillColor(TEAL)
+        .text(r.horario, ME + 12, yy + 10, { width: 44 });
+      doc.font('Helvetica-Bold').fontSize(10.5).fillColor(AZUL)
+        .text(r.nome, ME + 60, yy + 9.5, { width: UTIL - 200 });
+      doc.font('Helvetica').fontSize(8).fillColor(SUAVE)
+        .text(
+          `${fmt(r.ptn)} P · ${fmt(r.cho)} C · ${fmt(r.lip)} G`,
+          ME + UTIL - 180, yy + 10.5, { width: 120, align: 'right' },
         );
-        const alturaItem = 10 + nomeAltura * 13 + it.substitutos.length * 11;
-        if (doc.y + alturaItem > ALTURA_A4 - MARGEM_INF - 20) {
-          doc.addPage();
-          this.desenharTopo(doc, false);
-          doc.y = MARGEM_SUP - 30;
+      doc.font('Helvetica-Bold').fontSize(9.5).fillColor(AZUL_MED)
+        .text(`${r.kcal} kcal`, ME + UTIL - 54, yy + 10, { width: 46, align: 'right' });
+      doc.y = yy + 34;
+      doc.x = ME;
+    }
+    doc.moveDown(0.5);
+
+    // hidratação
+    if (d.metaAgua > 0) {
+      const litrosTxt = d.metaAgua.toFixed(1).replace('.', ',');
+      const copos = Math.round((d.metaAgua * 1000) / 300);
+      const yAg = doc.y;
+      doc.roundedRect(ME, yAg, UTIL, 34, 7).fill(AZUL_CLARO);
+      doc.font('Helvetica-Bold').fontSize(10).fillColor(AZUL)
+        .text(`Hidratação: ${litrosTxt} litros por dia`, ME + 14, yAg + 8, { width: UTIL - 28 });
+      doc.font('Helvetica').fontSize(8).fillColor(AZUL_MED)
+        .text(
+          `Equivale a cerca de ${copos} copos de 300 ml, distribuídos ao longo do dia.`,
+          ME + 14, yAg + 21, { width: UTIL - 28 },
+        );
+      doc.y = yAg + 34;
+      doc.x = ME;
+    }
+
+    // ══════════ 2. PLANEJAMENTO ══════════
+    novaPagina('Planejamento das refeições');
+    doc.font('Helvetica').fontSize(8.5).fillColor(SUAVE)
+      .text(
+        'Quantidades por refeição. Itens marcados com “ou” são alternativas — escolha uma.',
+        ME, doc.y, { width: UTIL },
+      );
+    doc.moveDown(1);
+
+    /** Altura que a refeição vai ocupar (título + itens + rodapé de macros). */
+    const alturaRefeicao = (r: RefeicaoPdf): number => {
+      let h = 30 + 6; // faixa de título + respiro
+      for (const it of r.itens) {
+        doc.font('Helvetica').fontSize(10);
+        const linhas = Math.max(
+          1,
+          Math.ceil(doc.widthOfString(it.nome) / (UTIL - 190)),
+        );
+        h += 9 + linhas * 12.5;
+        h += it.substitutos.length * 13 + (it.substitutos.length ? 4 : 0);
+      }
+      return h + 20; // rodapé com macros
+    };
+
+    for (const r of d.refeicoes) {
+      // Quebra só se a refeição INTEIRA não couber (evita refeição órfã no fim da página).
+      const precisa = alturaRefeicao(r);
+      const espaco = H - MINF - doc.y;
+      if (precisa > espaco && precisa <= H - MINF - MSUP_CONT - 40) {
+        novaPagina('Planejamento das refeições (continuação)');
+      } else if (doc.y > H - MINF - 130) {
+        novaPagina('Planejamento das refeições (continuação)');
+      }
+
+      const yF = doc.y;
+      const altF = 30;
+      doc.rect(ME, yF, UTIL, altF).fill(AZUL_CLARO);
+      doc.rect(ME, yF, 4, altF).fill(TEAL);
+      doc.font('Helvetica-Bold').fontSize(11).fillColor(AZUL)
+        .text(r.nome.toUpperCase(), ME + 15, yF + 9, { width: UTIL - 160 });
+      doc.font('Helvetica-Bold').fontSize(10.5).fillColor(TEAL)
+        .text(r.horario, ME + UTIL - 70, yF + 9.5, { width: 56, align: 'right' });
+      doc.y = yF + altF + 6;
+      doc.x = ME;
+
+      let zebra = false;
+      for (const it of r.itens) {
+        doc.font('Helvetica').fontSize(10);
+        const linhasNome = Math.max(1, Math.ceil(doc.widthOfString(it.nome) / (UTIL - 190)));
+        const altItem = 9 + linhasNome * 12.5;
+        const altSub = it.substitutos.length * 13;
+        const altTotal = altItem + altSub + (it.substitutos.length ? 4 : 0);
+
+        if (doc.y + altTotal > H - MINF - 18) {
+          novaPagina('Planejamento das refeições (continuação)');
         }
-        const yItem = doc.y;
-        doc.rect(MARGEM_ESQ, yItem, LARGEM_UTIL, alturaItem)
-          .fill(zebra ? AZUL_CLARO : '#ffffff');
+
+        const yI = doc.y;
+        doc.rect(ME, yI, UTIL, altTotal).fill(zebra ? '#f7f9fc' : '#ffffff');
 
         doc.font('Helvetica').fontSize(10).fillColor(TEXTO)
-          .text(it.nome, MARGEM_ESQ + 14, yItem + 7, { width: LARGEM_UTIL - 170 });
-        doc.font('Helvetica-Bold').fontSize(10).fillColor(AZUL)
-          .text(it.medida, MARGEM_ESQ + LARGEM_UTIL - 150, yItem + 7, {
-            width: 136, align: 'right',
-          });
+          .text(it.nome, ME + 15, yI + 6, { width: UTIL - 190 });
+        doc.font('Helvetica-Bold').fontSize(9.5).fillColor(AZUL_MED)
+          .text(it.medida, ME + UTIL - 170, yI + 6.5, { width: 155, align: 'right' });
 
-        let ySub = doc.y;
-        for (const sub of it.substitutos) {
-          ySub = doc.y;
-          doc.font('Helvetica').fontSize(8.5).fillColor(TEXTO_SUAVE)
-            .text(`ou  ${sub}`, MARGEM_ESQ + 26, ySub, { width: LARGEM_UTIL - 40 });
+        let yS = yI + altItem;
+        for (const s of it.substitutos) {
+          doc.font('Helvetica-Bold').fontSize(7.5).fillColor(TEAL)
+            .text('ou', ME + 28, yS + 1, { width: 14 });
+          doc.font('Helvetica').fontSize(8.5).fillColor(SUAVE)
+            .text(`${s.nome} — ${s.medida}`, ME + 44, yS, { width: UTIL - 70 });
+          yS = doc.y + 2;
         }
 
-        doc.y = Math.max(doc.y, yItem + alturaItem);
-        doc.x = MARGEM_ESQ;
+        doc.y = Math.max(yI + altTotal, doc.y);
+        doc.x = ME;
         zebra = !zebra;
       }
 
-      doc.x = MARGEM_ESQ;
-      doc.moveDown(0.9);
-    }
-
-    // ── Hidratação ────────────────────────────────────────────────────
-    if (dados.metaAguaLitros && dados.metaAguaLitros > 0) {
-      if (doc.y > ALTURA_A4 - MARGEM_INF - 120) {
-        doc.addPage();
-        this.desenharTopo(doc, false);
-        doc.y = MARGEM_SUP - 30;
-      }
-      doc.moveDown(0.4);
-      const yAgua = doc.y;
-      doc.roundedRect(MARGEM_ESQ, yAgua, LARGEM_UTIL, 30, 6).fill(AZUL_CLARO);
-      doc.font('Helvetica-Bold').fontSize(10).fillColor(AZUL)
+      const yM = doc.y + 2;
+      doc.moveTo(ME, yM).lineTo(ME + UTIL, yM).lineWidth(0.5).strokeColor(LINHA).stroke();
+      doc.font('Helvetica').fontSize(7.5).fillColor(SUAVE)
         .text(
-          `Hidratação diária: ${dados.metaAguaLitros.toLocaleString('pt-BR')} litros de água`,
-          MARGEM_ESQ + 14, yAgua + 9, { width: LARGEM_UTIL - 28 },
+          `Proteínas ${fmt(r.ptn)} g   ·   Carboidratos ${fmt(r.cho)} g   ·   Gorduras ${fmt(r.lip)} g`,
+          ME + 15, yM + 5, { width: UTIL - 110 },
         );
-      doc.y = yAgua + 30;
-      doc.x = MARGEM_ESQ;
+      doc.font('Helvetica-Bold').fontSize(8).fillColor(AZUL_MED)
+        .text(`${r.kcal} kcal`, ME + UTIL - 80, yM + 4.5, { width: 68, align: 'right' });
+      doc.y = yM + 20;
+      doc.x = ME;
     }
 
-    // ── Nota de individualidade ───────────────────────────────────────
-    doc.moveDown(0.8);
-    doc.font('Helvetica-Oblique').fontSize(8.5).fillColor(TEXTO_SUAVE)
+    // ══════════ 3. MICRONUTRIENTES ══════════
+    // Aproveita a página atual quando sobra espaço: uma refeição sozinha numa
+    // página inteira é feio, e a grade de micros caberia logo abaixo dela.
+    const espacoMicros = H - MINF - doc.y;
+    if (espacoMicros >= 400) {
+      doc.moveDown(1.4);
+      doc.font('Helvetica-Bold').fontSize(13).fillColor(AZUL)
+        .text('Vitaminas, minerais e gorduras', ME, doc.y, { width: UTIL });
+      doc.moveDown(0.5);
+    } else {
+      novaPagina('Vitaminas, minerais e gorduras');
+    }
+    doc.font('Helvetica').fontSize(8.5).fillColor(SUAVE)
       .text(
-        'Este plano alimentar é individualizado, elaborado a partir da sua avaliação nutricional. ' +
-        'Não deve ser compartilhado ou seguido por terceiros. Em caso de dúvida, fale com seu nutricionista.',
-        { align: 'justify', lineGap: 2 },
+        'Total do dia comparado com a recomendação para o seu perfil (DRI).',
+        ME, doc.y, { width: UTIL },
+      );
+    doc.moveDown(0.5);
+    doc.font('Helvetica').fontSize(7).fillColor(SUAVE)
+      .text(
+        'Verde: atende ou supera a recomendação. Âmbar: entre 70% e 99%. Vermelho: abaixo de 70%. ' +
+        'Gorduras não têm meta diária fixa — a referência é a proporção em relação às calorias do plano.',
+        ME, doc.y, { width: UTIL, lineGap: 1.5 },
+      );
+    doc.moveDown(0.9);
+
+    const COLS = 3;
+    const gap = 7;
+    const cw = (UTIL - gap * (COLS - 1)) / COLS;
+    const ch = 34;
+    let yGrade = doc.y;
+    let col = 0;
+
+    for (const m of d.micros) {
+      if (col === 0 && yGrade + ch > H - MINF - 12) {
+        novaPagina('Vitaminas, minerais e gorduras (continuação)');
+        yGrade = doc.y;
+      }
+      const x = ME + col * (cw + gap);
+
+      let corTxt = SUAVE;
+      if (m.percentual >= 100) corTxt = VERDE;
+      else if (m.percentual >= 70) corTxt = AMBAR;
+      else if (m.percentual > 0) corTxt = VERMELHO;
+
+      doc.roundedRect(x, yGrade, cw, ch, 5).fill('#fbfcfd');
+      doc.roundedRect(x, yGrade, cw, ch, 5).lineWidth(0.6).strokeColor('#e9eef4').stroke();
+      doc.font('Helvetica').fontSize(6.8).fillColor(SUAVE)
+        .text(m.rotulo, x + 8, yGrade + 6, { width: cw - 24 });
+      doc.font('Helvetica-Bold').fontSize(9.5).fillColor(TEXTO)
+        .text(m.valor, x + 8, yGrade + 15, { width: cw - 16, lineBreak: false });
+      if (m.percentual > 0) {
+        doc.roundedRect(x + 8, yGrade + 26, cw - 16, 4, 2).fill('#eef2f6');
+        const wBar = Math.max(2, Math.min(1, m.percentual / 120) * (cw - 16));
+        doc.roundedRect(x + 8, yGrade + 26, wBar, 4, 2).fill(corTxt);
+        doc.font('Helvetica').fontSize(6.5).fillColor(corTxt)
+          .text(`${m.percentual}%`, x + cw - 33, yGrade + 17, { width: 25, align: 'right' });
+      }
+
+      col++;
+      if (col >= COLS) {
+        col = 0;
+        yGrade += ch + gap;
+      }
+    }
+    doc.y = yGrade + (col > 0 ? ch : 0) + 8;
+    doc.x = ME;
+
+    if (d.microsIncompletos) {
+      doc.font('Helvetica-Oblique').fontSize(7).fillColor(SUAVE)
+        .text(
+          'Alguns alimentos deste plano não têm informação de micronutrientes na base de dados, ' +
+          'então o total pode estar subestimado.',
+          ME, doc.y, { width: UTIL },
+        );
+    }
+
+    // ══════════ 4. LISTA DE COMPRAS ══════════
+    if (d.compras.length > 0) {
+      novaPagina('Lista de compras');
+      doc.font('Helvetica').fontSize(8.5).fillColor(SUAVE)
+        .text(
+          'Quantidades totais do período do plano. Itens com “ou” são alternativas — compre uma.',
+          ME, doc.y, { width: UTIL },
+        );
+      doc.moveDown(1);
+
+      for (const g of d.compras) {
+        if (doc.y > H - MINF - 70) novaPagina('Lista de compras (continuação)');
+        doc.font('Helvetica-Bold').fontSize(8).fillColor(TEAL)
+          .text(g.categoria.toUpperCase(), ME, doc.y, { width: UTIL, characterSpacing: 0.5 });
+        doc.moveDown(0.45);
+
+        for (const it of g.itens) {
+          const alt = 15 + it.alternativas.length * 10;
+          if (doc.y + alt > H - MINF - 10) novaPagina('Lista de compras (continuação)');
+          const y = doc.y;
+          doc.roundedRect(ME + 2, y + 2, 8, 8, 1.5)
+            .lineWidth(0.8).strokeColor('#b6c2cf').stroke();
+          doc.font('Helvetica').fontSize(9.5).fillColor(TEXTO)
+            .text(it.nome, ME + 18, y, { width: UTIL - 140 });
+          doc.font('Helvetica-Bold').fontSize(9).fillColor(AZUL_MED)
+            .text(it.quantidade, ME + UTIL - 108, y + 0.5, { width: 103, align: 'right' });
+
+          let yO = doc.y;
+          for (const o of it.alternativas) {
+            doc.font('Helvetica-Bold').fontSize(7).fillColor(TEAL)
+              .text('ou', ME + 26, yO + 1, { width: 12 });
+            doc.font('Helvetica').fontSize(8).fillColor(SUAVE)
+              .text(o, ME + 40, yO, { width: UTIL - 62 });
+            yO = doc.y + 1;
+          }
+          doc.y = Math.max(doc.y, y + alt - 3);
+          doc.x = ME;
+        }
+        doc.moveDown(0.6);
+      }
+    }
+
+    // ══════════ Nota + assinatura ══════════
+    if (doc.y > H - MINF - 150) novaPagina();
+    doc.moveDown(0.8);
+    doc.font('Helvetica-Oblique').fontSize(7.5).fillColor(SUAVE)
+      .text(
+        'Este plano é individualizado e foi elaborado a partir da sua avaliação nutricional. ' +
+        'Não deve ser compartilhado ou seguido por terceiros.',
+        ME, doc.y, { width: UTIL, align: 'justify', lineGap: 1.5 },
       );
 
-    // ── Assinatura ────────────────────────────────────────────────────
-    let yAssinatura = Math.max(doc.y + 46, ALTURA_A4 - MARGEM_INF - 84);
-    if (yAssinatura + 64 > ALTURA_A4 - MARGEM_INF) {
-      doc.addPage();
-      this.desenharTopo(doc, false);
-      yAssinatura = MARGEM_SUP + 20;
-      doc.y = yAssinatura;
-    }
-    doc.x = MARGEM_ESQ;
-    doc.y = yAssinatura;
-    doc.font('Helvetica').fontSize(9).fillColor(TEXTO_SUAVE)
-      .text(`São Paulo, ${dataExtenso(new Date())}.`, { align: 'center', width: LARGEM_UTIL });
-    doc.moveDown(2.4);
-    const yRisco = doc.y;
-    doc.moveTo(LARGEMA4 / 2 - 110, yRisco).lineTo(LARGEMA4 / 2 + 110, yRisco)
-      .lineWidth(0.8).strokeColor(TEXTO_SUAVE).stroke();
-    doc.y = yRisco + 8;
-    doc.font('Helvetica-Bold').fontSize(10).fillColor(TEXTO)
-      .text(prof.nome, { align: 'center', width: LARGEM_UTIL });
-    doc.font('Helvetica').fontSize(8.5).fillColor(TEXTO_SUAVE)
-      .text(prof.especialidade, { align: 'center', width: LARGEM_UTIL });
-    doc.text(`CRN ${prof.conselhoNumero}`, { align: 'center', width: LARGEM_UTIL });
+    doc.moveDown(1.8);
+    doc.font('Helvetica').fontSize(8.5).fillColor(SUAVE)
+      .text(`São Paulo, ${dataExtenso(new Date())}.`, ME, doc.y, { width: UTIL, align: 'center' });
+    doc.moveDown(2.6);
+    const yR = doc.y;
+    doc.moveTo(W / 2 - 100, yR).lineTo(W / 2 + 100, yR)
+      .lineWidth(0.7).strokeColor('#9aa7b4').stroke();
+    doc.y = yR + 7;
+    doc.font('Helvetica-Bold').fontSize(9.5).fillColor(TEXTO)
+      .text(prof.nome, ME, doc.y, { width: UTIL, align: 'center' });
+    doc.font('Helvetica').fontSize(8).fillColor(SUAVE)
+      .text(
+        `${prof.especialidade}  ·  ${prof.conselhoTipo} ${prof.conselhoNumero}`,
+        ME, doc.y + 1, { width: UTIL, align: 'center' },
+      );
 
-    // ── Paginação em todas as páginas ─────────────────────────────────
+    // ══════════ Rodapés ══════════
     doc.flushPages();
     const total = doc.bufferedPageRange().count;
     for (let i = 0; i < total; i++) {
       doc.switchToPage(i);
-      doc.font('Helvetica').fontSize(8).fillColor(TEXTO_SUAVE)
+      const yF = H - 30;
+      doc.moveTo(ME, yF - 12).lineTo(W - MD, yF - 12)
+        .lineWidth(0.4).strokeColor(LINHA).stroke();
+      doc.font('Helvetica').fontSize(7).fillColor(SUAVE)
         .text(
-          `Página ${i + 1} de ${total}`,
-          MARGEM_ESQ, ALTURA_A4 - 34, { width: LARGEM_UTIL, align: 'center' },
+          `${(prof.nome ?? '').toUpperCase()}  ·  ${prof.conselhoTipo} ${prof.conselhoNumero}`,
+          ME, yF - 7, { width: UTIL / 2 },
         );
+      doc.text(`Página ${i + 1} de ${total}`, ME + UTIL / 2, yF - 7, {
+        width: UTIL / 2, align: 'right',
+      });
     }
 
     doc.end();
     return doc;
   }
+}
+
+/** Idade em anos a partir da data de nascimento. */
+function idadeEmAnos(nasc: Date | null): number {
+  if (!nasc) return 30;
+  const hoje = new Date();
+  const nascD = new Date(nasc);
+  let idade = hoje.getFullYear() - nascD.getFullYear();
+  const m = hoje.getMonth() - nascD.getMonth();
+  if (m < 0 || (m === 0 && hoje.getDate() < nascD.getDate())) idade--;
+  return idade > 0 && idade < 120 ? idade : 30;
 }
