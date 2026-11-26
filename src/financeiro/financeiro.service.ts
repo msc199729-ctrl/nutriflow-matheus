@@ -14,6 +14,32 @@ import { CreateLancamentoFinanceiroDto } from './dto/create-lancamento-financeir
 import { UpdateLancamentoFinanceiroDto } from './dto/update-lancamento-financeiro.dto';
 import { QueryLancamentosFinanceirosDto } from './dto/query-lancamentos-financeiros.dto';
 
+const APP_TIME_ZONE = 'America/Sao_Paulo';
+
+/**
+ * Situação EFETIVA de um lançamento.
+ *
+ * `atrasado` nunca foi escrito no banco — não existe nada que promova um
+ * pendente vencido. Em vez de depender de escrita (que falha em silêncio e
+ * deixou o cartão "Atrasados" em R$ 0 desde sempre), derivamos na leitura:
+ * atrasado é a consequência de uma data ter passado.
+ */
+function statusEfetivo(
+  status: string,
+  vencimento: Date,
+  hoje: Date,
+): StatusLancamentoFinanceiro {
+  if (status === StatusLancamentoFinanceiro.pago) {
+    return StatusLancamentoFinanceiro.pago;
+  }
+  if (status === StatusLancamentoFinanceiro.atrasado) {
+    return StatusLancamentoFinanceiro.atrasado;
+  }
+  return vencimento < hoje
+    ? StatusLancamentoFinanceiro.atrasado
+    : StatusLancamentoFinanceiro.pendente;
+}
+
 @Injectable()
 export class FinanceiroService {
   private readonly logger = new Logger(FinanceiroService.name);
@@ -30,6 +56,23 @@ export class FinanceiroService {
     }
   }
 
+  /**
+   * Data de HOJE no fuso de Brasília, como Date de meia-noite UTC.
+   *
+   * Comparar vencimento com `new Date()` em UTC erra o dia: às 22h de Brasília
+   * o UTC já é o dia seguinte, e um lançamento que vence hoje apareceria
+   * atrasado (ou vice-versa).
+   */
+  private hojeUtc(): Date {
+    const ymd = new Intl.DateTimeFormat('en-CA', {
+      timeZone: APP_TIME_ZONE,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(new Date());
+    return new Date(`${ymd}T00:00:00.000Z`);
+  }
+
   private monthBounds(month: string): { start: Date; end: Date } {
     const [y, m] = month.split('-').map((v) => Number(v));
     const start = new Date(Date.UTC(y, m - 1, 1));
@@ -38,7 +81,14 @@ export class FinanceiroService {
   }
 
   private currentMonthKey(): string {
-    return new Date().toISOString().slice(0, 7);
+    // No fuso do app: em UTC, às 21h do último dia do mês já é o mês seguinte.
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: APP_TIME_ZONE,
+      year: 'numeric',
+      month: '2-digit',
+    })
+      .format(new Date())
+      .slice(0, 7);
   }
 
   private normalizeDay(value: string): Date {
@@ -63,7 +113,7 @@ export class FinanceiroService {
     observacoes: string | null;
     criadoEm: Date;
     atualizadoEm: Date;
-  }) {
+  }, hoje: Date = this.hojeUtc()) {
     return {
       id: row.id,
       idPaciente: row.idPaciente,
@@ -71,7 +121,9 @@ export class FinanceiroService {
       pacienteNome: row.pacienteNome,
       categoria: row.categoria,
       tipo: row.tipo,
-      status: row.status,
+      // Status derivado: vencido e não pago É atrasado, mesmo que no banco
+      // ainda esteja 'pendente'.
+      status: statusEfetivo(row.status, row.vencimento, hoje),
       valor: row.valor,
       vencimento: row.vencimento.toISOString().slice(0, 10),
       pagoEm: row.pagoEm?.toISOString().slice(0, 10) ?? null,
@@ -98,7 +150,9 @@ export class FinanceiroService {
         : {}),
       vencimento: { gte: start, lt: end },
       ...(query.tipo ? { tipo: query.tipo } : {}),
-      ...(query.status ? { status: query.status } : {}),
+      // Status NÃO entra aqui: 'atrasado' é derivado na leitura e um filtro
+      // no banco por ele voltaria vazio. Também não dá para somar um segundo
+      // `vencimento` neste objeto — o spread apagaria o do mês.
       ...(busca
         ? {
             OR: [
@@ -112,11 +166,23 @@ export class FinanceiroService {
   }
 
   async list(user: JwtPayloadUser, query: QueryLancamentosFinanceirosDto) {
+    const hoje = this.hojeUtc();
     const rows = await this.prisma.lancamentoFinanceiro.findMany({
       where: this.whereByUserAndQuery(user, query),
       orderBy: [{ vencimento: 'asc' }, { id: 'desc' }],
+      // O celular vem junto: sem ele não há como cobrar ninguém pela tela.
+      include: { paciente: { select: { celular: true } } },
     });
-    return rows.map((row) => this.mapLancamento(row));
+    const mapeados = rows.map((row) => ({
+      ...this.mapLancamento(row, hoje),
+      celular: row.paciente?.celular ?? null,
+    }));
+
+    // O filtro de status tem que ser aplicado DEPOIS de derivar: filtrar
+    // 'atrasado' no banco não acharia nada, porque a coluna nunca recebe
+    // esse valor.
+    if (!query.status) return mapeados;
+    return mapeados.filter((r) => r.status === query.status);
   }
 
   async create(user: JwtPayloadUser, dto: CreateLancamentoFinanceiroDto) {
@@ -166,7 +232,13 @@ export class FinanceiroService {
     if (dto.tipo !== undefined) data.tipo = dto.tipo;
     if (dto.status !== undefined) data.status = dto.status;
     if (dto.valor !== undefined) data.valor = dto.valor;
-    if (dto.vencimento !== undefined) data.vencimento = this.normalizeDay(dto.vencimento);
+    if (dto.vencimento !== undefined) {
+      const venc = this.normalizeDay(dto.vencimento);
+      data.vencimento = venc;
+      // Competência acompanha o vencimento: antes ficava no mês antigo e
+      // desalinhava a coluna.
+      data.competencia = dto.vencimento.slice(0, 7);
+    }
     if (dto.pagoEm !== undefined) data.pagoEm = dto.pagoEm ? this.normalizeDay(dto.pagoEm) : null;
     if (dto.observacoes !== undefined) data.observacoes = dto.observacoes.trim() || null;
 
@@ -183,7 +255,9 @@ export class FinanceiroService {
       where: { id },
       data: {
         status: StatusLancamentoFinanceiro.pago,
-        pagoEm: new Date(new Date().toISOString().slice(0, 10) + 'T00:00:00.000Z'),
+        // Data de pagamento no fuso do app: às 22h de Brasília o UTC já é
+        // amanhã e o pagamento ficaria com data futura.
+        pagoEm: this.hojeUtc(),
       },
     });
     return this.mapLancamento(paid);
@@ -210,34 +284,44 @@ export class FinanceiroService {
       vencimento: { gte: start, lt: end },
     };
 
+    const hoje = this.hojeUtc();
     const inMonth = await this.prisma.lancamentoFinanceiro.findMany({
       where: inMonthWhere,
-      select: { tipo: true, status: true, valor: true },
+      select: { tipo: true, status: true, valor: true, vencimento: true },
     });
 
-    const receitaPrevista = inMonth
+    // Status derivado: é isto que faz o "Atrasados" sair do zero.
+    const situacao = inMonth.map((x) => ({
+      ...x,
+      efetivo: statusEfetivo(x.status, x.vencimento, hoje),
+    }));
+
+    const receitaPrevista = situacao
       .filter((x) => x.tipo === 'receita')
       .reduce((sum, x) => sum + x.valor, 0);
-    const receitaRecebida = inMonth
-      .filter((x) => x.tipo === 'receita' && x.status === 'pago')
+    const receitaRecebida = situacao
+      .filter((x) => x.tipo === 'receita' && x.efetivo === 'pago')
       .reduce((sum, x) => sum + x.valor, 0);
-    const despesasPagas = inMonth
-      .filter((x) => x.tipo === 'despesa' && x.status === 'pago')
+    const despesasPagas = situacao
+      .filter((x) => x.tipo === 'despesa' && x.efetivo === 'pago')
       .reduce((sum, x) => sum + x.valor, 0);
-    const atrasados = inMonth
-      .filter((x) => x.status === 'atrasado')
+    // Atrasado = receita vencida e não paga. Só receita: despesa atrasada é
+    // dívida do consultório, não inadimplência de paciente.
+    const atrasados = situacao
+      .filter((x) => x.tipo === 'receita' && x.efetivo === 'atrasado')
+      .reduce((sum, x) => sum + x.valor, 0);
+    const despesasAtrasadas = situacao
+      .filter((x) => x.tipo === 'despesa' && x.efetivo === 'atrasado')
       .reduce((sum, x) => sum + x.valor, 0);
 
-    const upcomingEnd = new Date();
-    upcomingEnd.setDate(upcomingEnd.getDate() + 7);
+    // Janela no fuso do app: somar 7 dias ao "hoje" do calendário, não ao
+    // instante UTC (senão a lista erra por um dia depois das 21h).
+    const daquiSeteDias = new Date(hoje.getTime() + 7 * 24 * 60 * 60 * 1000);
     const upcomingRows = await this.prisma.lancamentoFinanceiro.findMany({
       where: {
         ...whereBase,
         status: { not: 'pago' },
-        vencimento: {
-          gte: new Date(new Date().toISOString().slice(0, 10) + 'T00:00:00.000Z'),
-          lte: new Date(upcomingEnd.toISOString().slice(0, 10) + 'T00:00:00.000Z'),
-        },
+        vencimento: { gte: hoje, lte: daquiSeteDias },
       },
       orderBy: [{ vencimento: 'asc' }, { id: 'desc' }],
       take: 8,
@@ -254,20 +338,32 @@ export class FinanceiroService {
             ...whereBase,
             vencimento: { gte: bounds.start, lt: bounds.end },
           },
-          select: { tipo: true, valor: true },
+          select: { tipo: true, valor: true, status: true },
         });
-        const receitas = rows
+        // Antes somava tudo numa barra só: receita prevista e recebida viravam
+        // o mesmo número, e o gráfico mostrava um negócio melhor que o real.
+        const receitasPrevistas = rows
           .filter((x) => x.tipo === 'receita')
           .reduce((sum, x) => sum + x.valor, 0);
-        const despesas = rows
+        const receitasRecebidas = rows
+          .filter((x) => x.tipo === 'receita' && x.status === 'pago')
+          .reduce((sum, x) => sum + x.valor, 0);
+        const despesasPrevistas = rows
           .filter((x) => x.tipo === 'despesa')
+          .reduce((sum, x) => sum + x.valor, 0);
+        const despesasPagasMes = rows
+          .filter((x) => x.tipo === 'despesa' && x.status === 'pago')
           .reduce((sum, x) => sum + x.valor, 0);
         return {
           mes: key,
-          label: d.toLocaleDateString('pt-BR', { month: 'short' }),
-          receitas,
-          despesas,
-          saldo: receitas - despesas,
+          label: d.toLocaleDateString('pt-BR', { month: 'short', timeZone: APP_TIME_ZONE }),
+          receitasPrevistas,
+          receitasRecebidas,
+          despesasPrevistas,
+          despesasPagas: despesasPagasMes,
+          // Saldo honesto: o que entrou menos o que saiu.
+          saldo: receitasRecebidas - despesasPagasMes,
+          saldoPrevisto: receitasPrevistas - despesasPrevistas,
         };
       }),
     );
@@ -278,122 +374,16 @@ export class FinanceiroService {
         receitaPrevista,
         receitaRecebida,
         despesasPagas,
+        despesasAtrasadas,
         saldoReal: receitaRecebida - despesasPagas,
         atrasados,
+        // Quantos lançamentos compõem o valor acima: um total não diz se são
+        // 2 pacientes ou 20.
+        qtdAtrasados: situacao.filter(
+          (x) => x.tipo === 'receita' && x.efetivo === 'atrasado',
+        ).length,
       },
-      proximosVencimentos: upcomingRows.map((x) => this.mapLancamento(x)),
+      proximosVencimentos: upcomingRows.map((x) => this.mapLancamento(x, hoje)),
       fluxoMensal: fluxo,
     };
   }
-
-  private async gerarMensalidadesCore(params: {
-    competencia?: string;
-    workspaceId?: number;
-    nutricionistaId?: number;
-  }) {
-    const competencia = params.competencia?.trim() || this.currentMonthKey();
-    const { end } = this.monthBounds(competencia);
-
-    const cobrancas = await this.prisma.cobrancaPaciente.findMany({
-      where: {
-        ativa: true,
-        ...(params.workspaceId !== undefined
-          ? { workspaceId: params.workspaceId }
-          : {}),
-        inicioCobranca: { lt: end },
-        paciente:
-          params.nutricionistaId !== undefined
-            ? { idNutricionista: params.nutricionistaId }
-            : undefined,
-      },
-      include: {
-        paciente: {
-          select: { id: true, nome: true, idNutricionista: true },
-        },
-      },
-    });
-
-    let geradas = 0;
-    let ignoradas = 0;
-
-    for (const cobranca of cobrancas) {
-      const exists = await this.prisma.lancamentoFinanceiro.findFirst({
-        where: {
-          workspaceId: cobranca.workspaceId,
-          idPaciente: cobranca.idPaciente,
-          competencia,
-          tipo: 'receita',
-          origem: 'mensalidade',
-        },
-        select: { id: true },
-      });
-      if (exists) {
-        ignoradas++;
-        continue;
-      }
-
-      const y = Number(competencia.slice(0, 4));
-      const m = Number(competencia.slice(5, 7));
-      const lastDay = new Date(Date.UTC(y, m, 0)).getUTCDate();
-      const day = Math.min(cobranca.diaVencimento, lastDay);
-      const vencimento = new Date(Date.UTC(y, m - 1, day));
-
-      await this.prisma.lancamentoFinanceiro.create({
-        data: {
-          workspaceId: cobranca.workspaceId,
-          idResponsavel: cobranca.paciente.idNutricionista,
-          idPaciente: cobranca.idPaciente,
-          descricao: `Mensalidade - ${cobranca.paciente.nome ?? `Paciente #${cobranca.idPaciente}`} - ${competencia}`,
-          pacienteNome: cobranca.paciente.nome,
-          categoria: cobranca.categoria ?? 'Mensalidade',
-          competencia,
-          origem: 'mensalidade',
-          tipo: 'receita',
-          status: 'pendente',
-          valor: cobranca.valorMensal,
-          vencimento,
-          observacoes: cobranca.observacoes,
-        },
-      });
-      geradas++;
-    }
-
-    return {
-      competencia,
-      totalCobrancasAtivas: cobrancas.length,
-      geradas,
-      ignoradas,
-    };
-  }
-
-  async gerarMensalidades(user: JwtPayloadUser, month?: string) {
-    this.ensureCanManage(user);
-    const workspaceId = requireWorkspaceId(user);
-    return this.gerarMensalidadesCore({
-      competencia: month,
-      workspaceId,
-      nutricionistaId:
-        user.perfil === PerfilUsuario.nutricionista ? user.sub : undefined,
-    });
-  }
-
-  @Cron('5 0 1 * *', { timeZone: 'America/Sao_Paulo' })
-  async gerarMensalidadesAutomaticamente() {
-    if (process.env.FINANCEIRO_AUTO_GERAR_MENSALIDADES === '0') {
-      this.logger.log('Geração automática de mensalidades desativada por ambiente.');
-      return;
-    }
-
-    try {
-      const resultado = await this.gerarMensalidadesCore({});
-      this.logger.log(
-        `Mensalidades automáticas ${resultado.competencia}: geradas=${resultado.geradas}, ignoradas=${resultado.ignoradas}`,
-      );
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      this.logger.error(
-        `Falha na geração automática de mensalidades: ${message}`,
-      );
-    }
-  }
-}
