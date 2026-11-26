@@ -41,6 +41,7 @@ enum TipoLancamentoFinanceiro {
   receita
   despesa
 }
+
 enum StatusConsulta {
   agendada
   realizada
@@ -285,7 +286,6 @@ model AvaliacaoFisica {
   idPaciente            Int      @map("id_paciente")
   data                  DateTime @default(now()) @db.Date
 
-  // Medidas básicas
   peso                  Float?
   altura                Float?
   alturaSentadoCm       Float?   @map("altura_sentado_cm")
@@ -295,7 +295,6 @@ model AvaliacaoFisica {
   rcq                   Float?
   riscoMetabolicoRcq    String?  @map("risco_metabolico_rcq")
 
-  // Composição corporal
   percentualGordura     Float?   @map("percentual_gordura")
   classificacaoGordura  String?  @map("classificacao_gordura")
   massaGorduraKg        Float?   @map("massa_gordura_kg")
@@ -303,7 +302,6 @@ model AvaliacaoFisica {
   massaResidualKg       Float?   @map("massa_residual_kg")
   massaMuscularKg       Float?   @map("massa_muscular_kg")
 
-  // Dobras cutâneas (10 dobras) + protocolo
   protocoloGordura      String?  @map("protocolo_gordura")
   somatorioDobrasMm     Float?   @map("somatorio_dobras_mm")
   dobraTricipital       Float?   @map("dobra_tricipital")
@@ -317,7 +315,6 @@ model AvaliacaoFisica {
   dobraCoxa             Float?   @map("dobra_coxa")
   dobraPanturrilha      Float?   @map("dobra_panturrilha")
 
-  // Bioimpedância
   biaPercentualGordura  Float?   @map("bia_percentual_gordura")
   biaClassificacaoGordura String? @map("bia_classificacao_gordura")
   biaPercentualMassaMuscular Float? @map("bia_percentual_massa_muscular")
@@ -327,7 +324,6 @@ model AvaliacaoFisica {
   biaIndiceGorduraVisceral Float? @map("bia_indice_gordura_visceral")
   biaIdadeMetabolica    Int?     @map("bia_idade_metabolica")
 
-  // Circunferências únicas (tronco)
   circPescoco           Float?   @map("circ_pescoco")
   circOmbro             Float?   @map("circ_ombro")
   circTorax             Float?   @map("circ_torax")
@@ -335,7 +331,6 @@ model AvaliacaoFisica {
   circAbdomen           Float?   @map("circ_abdomen")
   circQuadril           Float?   @map("circ_quadril")
 
-  // Circunferências bilaterais — Braço
   circBracoDirRelaxado    Float?   @map("circ_braco_dir_relaxado")
   circBracoEsqRelaxado    Float?   @map("circ_braco_esq_relaxado")
   circBracoDirContraido   Float?   @map("circ_braco_dir_contraido")
@@ -343,11 +338,9 @@ model AvaliacaoFisica {
   circBracoDirCmb         Float?   @map("circ_braco_dir_cmb")
   circBracoEsqCmb         Float?   @map("circ_braco_esq_cmb")
 
-  // Circunferências bilaterais — Antebraço
   circAntebracoDirBraco   Float?   @map("circ_antebraco_dir")
   circAntebracoEsq        Float?   @map("circ_antebraco_esq")
 
-  // Circunferências bilaterais — Coxa
   circCoxaProximalDir     Float?   @map("circ_coxa_proximal_dir")
   circCoxaProximalEsq     Float?   @map("circ_coxa_proximal_esq")
   circCoxaMedialDir       Float?   @map("circ_coxa_medial_dir")
@@ -355,11 +348,9 @@ model AvaliacaoFisica {
   circCoxaDistalDir       Float?   @map("circ_coxa_distal_dir")
   circCoxaDistalEsq       Float?   @map("circ_coxa_distal_esq")
 
-  // Circunferências bilaterais — Panturrilha
   circPanturrilhaDir      Float?   @map("circ_panturrilha_dir")
   circPanturrilhaEsq      Float?   @map("circ_panturrilha_esq")
 
-  // Fotos
   urlFotoFrente         String?  @map("url_foto_frente")
   urlFotoCostas         String?  @map("url_foto_costas")
   urlFotoLado           String?  @map("url_foto_lado")
@@ -367,47 +358,4 @@ model AvaliacaoFisica {
   paciente Paciente @relation(fields: [idPaciente], references: [id], onDelete: Cascade)
 
   @@map("avaliacoes_fisicas")
-}
-
-// ---------------------------------------------------------------------------
-// Exames laboratoriais
-// ---------------------------------------------------------------------------
-
-/// Exame laboratorial de uma coleta (uma data, vários itens).
-model ExameLaboratorial {
-  id           Int      @id @default(autoincrement())
-  idPaciente   Int      @map("id_paciente")
-  /// Data da COLETA (não da digitação) — é por ela que se ordena o histórico.
-  dataColeta   DateTime @db.Date @map("data_coleta")
-  laboratorio  String?
-  observacoes  String?  @db.Text
-  criadoEm     DateTime @default(now()) @map("criado_em")
-  atualizadoEm DateTime @updatedAt @map("atualizado_em")
-
-  paciente Paciente      @relation(fields: [idPaciente], references: [id], onDelete: Cascade)
-  itens    ItemExame[]
-
-  @@index([idPaciente, dataColeta])
-  @@map("exames_laboratoriais")
-}
-
-/// Um biomarcador dentro de uma coleta (ex.: Ferritina = 18 ng/mL).
-model ItemExame {
-  id             Int     @id @default(autoincrement())
-  idExame        Int     @map("id_exame")
-  /// Nome do biomarcador, usado para agrupar o mesmo parâmetro entre coletas.
-  nome           String
-  valor          Float?
-  unidade        String?
-  /// Faixa de referência do laudo. Guardada porque muda entre laboratórios.
-  referenciaMin  Float?  @map("referencia_min")
-  referenciaMax  Float?  @map("referencia_max")
-  /// Texto livre do laudo quando o resultado não é numérico ("não reagente").
-  resultadoTexto String? @map("resultado_texto")
-
-  exame ExameLaboratorial @relation(fields: [idExame], references: [id], onDelete: Cascade)
-
-  @@index([idExame])
-  @@index([nome])
-  @@map("itens_exame")
 }
