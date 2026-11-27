@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -12,7 +13,7 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiBody, ApiConsumes, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
-import { diskStorage } from 'multer';
+import { memoryStorage, diskStorage } from 'multer';
 import { extname, join } from 'path';
 import { DailyLogsService } from './daily-logs.service';
 import { CreateRegistroDiarioDto } from './dto/create-registro-diario.dto';
@@ -39,7 +40,7 @@ export class DailyLogsController {
   @Get()
 @ApiQuery({ name: 'data', required: false, description: 'Data no formato YYYY-MM-DD (padrão: hoje)' })
 @ApiQuery({ name: 'idPaciente', required: false, description: 'ID do paciente (obrigatório para nutricionista/admin)' })
-@ApiResponse({ status: 200, description: 'Registros do dia e total de água (ml)' })
+@ApiResponse({ status: 200, description: 'Registros do dia, total de água (ml) e meta de água' })
 findByDay(
   @Query('data') dataStr: string | undefined,
   @Query('idPaciente') idPaciente: string | undefined,
@@ -86,6 +87,50 @@ findByDay(
     return this.dailyLogsService.create(dto, user, urlFotoPrato);
   }
 
+  /**
+   * Análise da foto do prato.
+   *
+   * Existe para o app não receber 404 e mostrar um erro de rede: a resposta diz
+   * que o recurso ainda não está pronto. A foto NÃO é salva aqui — esta rota só
+   * devolve a análise; quem quiser guardar a refeição chama `POST /registros-diarios`.
+   *
+   * A rota precisa vir declarada ANTES de `@Delete(':id')`? Não conflita (métodos
+   * diferentes), mas fica junto do POST por ser a mesma família de entrada.
+   */
+  @Post('analisar-imagem')
+  @UseInterceptors(
+    FileInterceptor('foto_prato', {
+      storage: memoryStorage(),
+      limits: { fileSize: 5 * 1024 * 1024 },
+      fileFilter: (_req, file, cb) => {
+        const allowed = /image\/(jpeg|png|gif|webp)/.test(file.mimetype);
+        cb(null, !!allowed);
+      },
+    }),
+  )
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: { foto_prato: { type: 'string', format: 'binary' } },
+    },
+  })
+  @ApiResponse({
+    status: 201,
+    description: 'Análise indisponível (recurso ainda não implementado)',
+  })
+  @ApiResponse({ status: 400, description: 'Foto ausente ou em formato não suportado' })
+  analisarImagem(
+    @UploadedFile() file?: { buffer?: Buffer; mimetype?: string },
+  ) {
+    if (!file?.buffer || file.buffer.length === 0) {
+      throw new BadRequestException(
+        'Envie a foto do prato no campo "foto_prato" (jpeg, png, gif ou webp).',
+      );
+    }
+    return this.dailyLogsService.analisarImagemPrato(file.buffer);
+  }
+
   @Delete(':id')
   @ApiResponse({ status: 200, description: 'Registro removido' })
   @ApiResponse({ status: 403, description: 'Acesso negado' })
@@ -95,4 +140,4 @@ findByDay(
   ) {
     return this.dailyLogsService.remove(user, id);
   }
-} 
+}
