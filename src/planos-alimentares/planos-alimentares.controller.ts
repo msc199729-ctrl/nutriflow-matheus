@@ -16,6 +16,34 @@ export class PlanosAlimentaresController {
     private readonly notificacoes: NotificacoesService,
   ) {}
 
+  /**
+   * Avisa o paciente que há plano (novo ou editado) no app.
+   *
+   * Nunca lança — `NotificacoesService.criarSeNovo` engole o erro de propósito:
+   * um aviso que falha não pode desfazer a publicação do plano. E deduplica por
+   * plano em 12 h, então salvar várias vezes no mesmo dia não enche a caixa.
+   *
+   * Fica no controller, e não no serviço, para não reescrever arquivos grandes
+   * já no repo.
+   */
+  private async avisarPlano(
+    idPaciente: number,
+    idPlano: number,
+    atualizacao: boolean,
+  ): Promise<void> {
+    await this.notificacoes.criarSeNovo({
+      idPaciente,
+      tipo: TipoNotificacao.planoPublicado,
+      titulo: atualizacao
+        ? 'Seu planejamento alimentar foi atualizado'
+        : 'Seu planejamento alimentar está disponível',
+      mensagem: atualizacao
+        ? 'Seu nutricionista atualizou seu plano alimentar. Abra o app para ver as refeições, porções, substitutos e a lista de compras.'
+        : 'Seu nutricionista publicou seu plano alimentar. Abra o app para ver as refeições, porções, substitutos e a lista de compras.',
+      idReferencia: idPlano,
+    });
+  }
+
   @Get('me')
   meuPlano(@CurrentUser() user: JwtPayloadUser) {
     return this.planosAlimentaresService.findPlanoAtivoByPaciente(user);
@@ -42,14 +70,7 @@ export class PlanosAlimentaresController {
     const plano = await this.planosAlimentaresService.createPlanoNutricionista(dto, user);
     // O plano nasce ativo: é o que o paciente abre no app. Avisar aqui evita
     // plano publicado sem aviso — antes ele só sabia se você mandasse zap.
-    await this.notificacoes.criarSeNovo({
-      idPaciente: dto.idPaciente,
-      tipo: TipoNotificacao.planoPublicado,
-      titulo: 'Seu planejamento alimentar está disponível',
-      mensagem:
-        'Seu nutricionista publicou seu plano alimentar. Abra o app para ver as refeições, porções, substitutos e a lista de compras.',
-      idReferencia: plano.id,
-    });
+    await this.avisarPlano(dto.idPaciente, plano.id, false);
     return plano;
   }
 
@@ -58,36 +79,55 @@ export class PlanosAlimentaresController {
     @Param('id', ParseIntPipe) id: number,
     @CurrentUser() user: JwtPayloadUser,
   ) {
+    // A cópia nasce desligada (`ativo: false`), então NÃO avisa: ela só chega ao
+    // paciente quando for ligada em `PATCH /:id/disponibilidade`, e é lá que o
+    // aviso nasce.
     return this.planosAlimentaresService.duplicarPlano(id, user);
   }
 
   @Patch(':id/disponibilidade')
-  disponibilidade(
+  async disponibilidade(
     @Param('id', ParseIntPipe) id: number,
     @Body() body: { ativo: boolean },
     @CurrentUser() user: JwtPayloadUser,
   ) {
-    return this.planosAlimentaresService.definirDisponibilidade(
+    const resultado = await this.planosAlimentaresService.definirDisponibilidade(
       id,
       body.ativo === true,
       user,
     );
+    // Ligar um plano é o momento em que ele passa a existir para o paciente.
+    // Sem isto, um plano duplicado (que nasce desligado) nunca gerava aviso.
+    if (resultado.ativo) {
+      await this.avisarPlano(resultado.idPaciente, id, false);
+    }
+    return resultado;
   }
+
   @Patch(':id')
-  atualizar(
+  async atualizar(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdatePlanoAlimentarDto,
     @CurrentUser() user: JwtPayloadUser,
   ) {
-    return this.planosAlimentaresService.atualizarPlano(id, dto, user);
+    const plano = await this.planosAlimentaresService.atualizarPlano(id, dto, user);
+    // Editar um plano que está no ar entrega uma versão nova ao paciente. Antes
+    // só o POST avisava, então salvar por cima do plano existente — que é o que
+    // o app faz no segundo save — não gerava aviso nenhum.
+    if (plano.ativo) {
+      await this.avisarPlano(plano.idPaciente, plano.id, true);
+    }
+    return plano;
   }
-  
+
   @Patch(':id/nome')
   renomear(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdateNomePlanoDto,
     @CurrentUser() user: JwtPayloadUser,
   ) {
+    // Nome do plano é organização interna do nutricionista, não novidade para o
+    // paciente — renomear não gera aviso.
     return this.planosAlimentaresService.renomearPlano(id, dto.nome, user);
   }
 
