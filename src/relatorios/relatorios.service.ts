@@ -1,9 +1,10 @@
 import { ForbiddenException, Injectable } from '@nestjs/common';
-import { PerfilUsuario, TipoConselho } from '@prisma/client';
+import { PerfilUsuario } from '@prisma/client';
 import PDFDocument from 'pdfkit';
 import { PrismaService } from '../prisma/prisma.service';
 import type { JwtPayloadUser } from '../common/decorators/current-user.decorator';
 import { requireWorkspaceId } from '../common/tenant/tenant-scope';
+import { ProfissionalService } from '../documentos/profissional.service';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { GerarImpressoDto, TipoImpresso } from './dto/gerar-impresso.dto';
@@ -18,7 +19,10 @@ export type RelatorioGeradoItem = {
 
 @Injectable()
 export class RelatoriosService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly profissional: ProfissionalService,
+  ) {}
 
   private ensureProfissional(user: JwtPayloadUser): void {
     if (
@@ -53,6 +57,27 @@ export class RelatoriosService {
     ];
     const found = candidates.find((p) => existsSync(p));
     return found ?? null;
+  }
+
+  /**
+   * Caminho local do logo do timbre.
+   *
+   * `logoUrl` da conta costuma ser o caminho público servido em `/uploads`; o
+   * PDF precisa do arquivo em disco. Se o logo da conta não existir, cai no
+   * logo do produto (comportamento antigo) em vez de sair sem cabeçalho.
+   */
+  private logoDaConta(logoUrl: string | null | undefined): string | null {
+    const limpo = logoUrl?.trim();
+    if (limpo && !/^https?:\/\//i.test(limpo)) {
+      const candidatos = [
+        limpo,
+        resolve(process.cwd(), limpo.replace(/^\/+/, '')),
+        resolve(process.cwd(), 'uploads', limpo.replace(/^\/?(uploads\/)?/, '')),
+      ];
+      const achado = candidatos.find((p) => existsSync(p));
+      if (achado) return achado;
+    }
+    return this.getLogoPath();
   }
 
   private parseParagraphs(text?: string): string[] {
@@ -273,18 +298,16 @@ export class RelatoriosService {
       throw new ForbiddenException('Paciente não encontrado no seu escopo.');
     }
 
-    const nutricionista = await this.prisma.nutricionista.findUnique({
-      where: { id: user.sub },
-      select: { nome: true, crn: true, tipoConselho: true },
-    });
-    const nomeNutri = nutricionista?.nome?.trim() || 'Nutricionista Responsável';
-    const siglaConselho =
-      nutricionista?.tipoConselho === TipoConselho.crm ? 'CRM' : 'CRN';
-    const numConselho = nutricionista?.crn?.trim();
-    const crnNutri = numConselho
-      ? `${siglaConselho} ${numConselho}`
-      : `${siglaConselho} não informado`;
-    const logoPath = this.getLogoPath();
+    // O timbre vem da CONTA do nutricionista logado, igual ao módulo
+    // `documentos`: cidade, especialidade, logo e Instagram são dados dele, não
+    // constantes do código. Antes daqui saíam só nome/CRN e o logo fixo do
+    // produto — por isso o atestado saía com cidade vazia.
+    const perfil = await this.profissional.doUsuario(user);
+    const nomeNutri = perfil.nome;
+    const crnNutri = perfil.conselhoNumero
+      ? `${perfil.conselhoTipo} ${perfil.conselhoNumero}`
+      : `${perfil.conselhoTipo} não informado`;
+    const logoPath = this.logoDaConta(perfil.logoUrl);
     const dataEmissao = this.formatDataPtBr(new Date());
     const nomePaciente = paciente.nome?.trim() || `Paciente #${paciente.id}`;
     const cpfPaciente = paciente.cpf?.trim() || '—';
@@ -331,8 +354,19 @@ export class RelatoriosService {
         logoPath,
       );
 
+      const linhaTimbrada = [perfil.especialidade, perfil.cidade]
+        .map((v) => v?.trim())
+        .filter((v): v is string => !!v)
+        .join(' • ');
+
       doc.fontSize(11).fillColor('#111827');
       doc.text(`Profissional responsável: ${nomeNutri} — ${crnNutri}`);
+      if (linhaTimbrada) {
+        doc.fontSize(10).fillColor('#4b5563').text(linhaTimbrada);
+      }
+      if (perfil.instagram?.trim()) {
+        doc.fontSize(9).fillColor('#6b7280').text(perfil.instagram.trim());
+      }
       doc.moveDown(1);
 
       if (dto.tipo === TipoImpresso.PRESCRICAO_ALIMENTAR) {
