@@ -176,6 +176,7 @@ model Nutricionista {
   pacientes            Paciente[]
   planosAlimentares    PlanoAlimentar[]
   consultasAgendadas   ConsultaAgendada[]
+  conversas            Conversa[]
 
   @@index([tipoConselho])
   @@map("nutricionistas")
@@ -217,6 +218,8 @@ model Paciente {
   calculosEnergeticos   CalculoEnergetico[]
   notificacoes          Notificacao[]
   ingestoesAgua         IngestaoAgua[]
+  dispositivosPush      DispositivoPush[]
+  conversas             Conversa[]
 
   @@index([workspaceId])
   @@index([idNutricionista])
@@ -303,7 +306,7 @@ model AvaliacaoFisica {
   percentualGordura     Float?   @map("percentual_gordura")
   classificacaoGordura  String?  @map("classificacao_gordura")
   massaGorduraKg        Float?   @map("massa_gordura_kg")
-  massaLivreGorduraKg   Float?   @map("massa_livre_gordura_kg")
+  massaLivreGorduraKg   Float?   @map("massalivre_gordura_kg")
   massaResidualKg       Float?   @map("massa_residual_kg")
   massaMuscularKg       Float?   @map("massa_muscular_kg")
 
@@ -826,4 +829,61 @@ model Notificacao {
 
   @@index([idPaciente, criadoEm])
   @@map("notificacoes")
+}
+
+/// Token de push (Expo) de um aparelho do paciente.
+///
+/// Um paciente pode ter mais de um aparelho, e o mesmo aparelho pode trocar de
+/// dono (logout/login). Por isso o token é único na tabela: registrar de novo
+/// reatribui o token ao paciente logado, em vez de acumular duplicata que
+/// mandaria aviso do paciente errado.
+model DispositivoPush {
+  id           Int      @id @default(autoincrement())
+  idPaciente   Int      @map("id_paciente")
+  token        String   @unique @db.VarChar(255)
+  /// `ios` | `android` | `web` — só informativo, o envio é o mesmo.
+  plataforma   String?  @db.VarChar(20)
+  criadoEm     DateTime @default(now()) @map("criado_em")
+  atualizadoEm DateTime @updatedAt @map("atualizado_em")
+
+  paciente Paciente @relation(fields: [idPaciente], references: [id], onDelete: Cascade)
+
+  @@index([idPaciente])
+  @@map("dispositivos_push")
+}
+
+/// Conversa paciente <-> nutricionista.
+///
+/// O painel web e o app já chamavam `/chat/conversas` e recebiam 404 — o módulo
+/// nunca existiu no backend. Uma conversa por par (paciente, nutricionista):
+/// abrir de novo devolve a mesma, em vez de criar outra.
+model Conversa {
+  id              Int      @id @default(autoincrement())
+  idPaciente      Int      @map("id_paciente")
+  idNutricionista Int      @map("id_nutricionista")
+  criadoEm        DateTime @default(now()) @map("criado_em")
+  atualizadoEm    DateTime @updatedAt @map("atualizado_em")
+
+  paciente      Paciente      @relation(fields: [idPaciente], references: [id], onDelete: Cascade)
+  nutricionista Nutricionista @relation(fields: [idNutricionista], references: [id], onDelete: Restrict)
+  mensagens     Mensagem[]
+
+  @@unique([idPaciente, idNutricionista])
+  @@index([idNutricionista, atualizadoEm])
+  @@map("conversas")
+}
+
+/// Mensagem de uma conversa. `lidaEm` nulo = não lida por quem recebeu.
+model Mensagem {
+  id             Int       @id @default(autoincrement())
+  idConversa     Int       @map("id_conversa")
+  autorUsuarioId Int       @map("autor_usuario_id")
+  texto          String    @db.Text
+  lidaEm         DateTime? @map("lida_em")
+  criadoEm       DateTime  @default(now()) @map("criado_em")
+
+  conversa Conversa @relation(fields: [idConversa], references: [id], onDelete: Cascade)
+
+  @@index([idConversa, criadoEm])
+  @@map("mensagens")
 }
