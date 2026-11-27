@@ -1,6 +1,7 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PerfilUsuario } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { PushService } from './push.service';
 import type { JwtPayloadUser } from '../common/decorators/current-user.decorator';
 
 /**
@@ -37,16 +38,18 @@ export interface NotificacaoPublica {
  * Caixa de entrada do paciente no app.
  *
  * Acesso por SQL direto (`$queryRaw`), e não pelo cliente tipado do Prisma:
- * assim o build não depende de `prisma generate` ter rodado nem de o modelo
- * estar declarado no schema — o mesmo caminho já usado pelo timbre
- * (`ProfissionalService`). A tabela é criada pela migração
- * `20261127090000_add_notificacao_paciente`.
+ * assim o build não depende de `prisma generate` ter rodado com o schema novo
+ * — o mesmo caminho já usado pelo timbre (`ProfissionalService`). A tabela é
+ * criada pela migração `20261127090000_add_notificacao_paciente`.
  */
 @Injectable()
 export class NotificacoesService {
   private readonly logger = new Logger(NotificacoesService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly push: PushService,
+  ) {}
 
   /**
    * Cria uma notificação. NUNCA lança: avisar o paciente não pode desfazer o
@@ -60,6 +63,21 @@ export class NotificacoesService {
         VALUES (${dados.idPaciente}, ${dados.tipo}, ${dados.titulo}, ${dados.mensagem},
                 ${dados.idReferencia ?? null})
       `;
+      // O push é o sino, não o aviso: o item já está na caixa de entrada. Se o
+      // aparelho não receber, o paciente ainda vê a notificação ao abrir o app.
+      // `void` de propósito: o envio é em segundo plano e nunca segura a
+      // publicação do plano esperando a resposta da Expo.
+      void this.push.enviarParaPaciente(dados.idPaciente, {
+        titulo: dados.titulo,
+        mensagem: dados.mensagem,
+        dados: {
+          type:
+            dados.tipo === TipoNotificacao.formularioEnviado
+              ? 'formulario'
+              : 'plano',
+          idReferencia: dados.idReferencia ?? null,
+        },
+      });
     } catch (erro) {
       this.logger.error(
         `Falha ao notificar paciente ${dados.idPaciente} (${dados.tipo}): ${
