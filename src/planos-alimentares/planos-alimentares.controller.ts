@@ -6,12 +6,14 @@ import { PlanosAlimentaresService } from './planos-alimentares.service';
 import { CreatePlanoAlimentarDto } from './dto/create-plano-alimentar.dto';
 import { UpdateNomePlanoDto } from './dto/update-nome-plano.dto';
 import { UpdatePlanoAlimentarDto } from './dto/update-plano-alimentar.dto';
+import { NotificacoesService, TipoNotificacao } from '../notificacoes/notificacoes.service';
 
 @Controller('planos-alimentares')
 @UseGuards(JwtAuthGuard)
 export class PlanosAlimentaresController {
   constructor(
     private readonly planosAlimentaresService: PlanosAlimentaresService,
+    private readonly notificacoes: NotificacoesService,
   ) {}
 
   @Get('me')
@@ -33,11 +35,22 @@ export class PlanosAlimentaresController {
   }
 
   @Post()
-  criar(
+  async criar(
     @Body() dto: CreatePlanoAlimentarDto,
     @CurrentUser() user: JwtPayloadUser,
   ) {
-    return this.planosAlimentaresService.createPlanoNutricionista(dto, user);
+    const plano = await this.planosAlimentaresService.createPlanoNutricionista(dto, user);
+    // O plano nasce ativo: é o que o paciente abre no app. Avisar aqui evita
+    // plano publicado sem aviso — antes ele só sabia se você mandasse zap.
+    await this.notificacoes.criarSeNovo({
+      idPaciente: dto.idPaciente,
+      tipo: TipoNotificacao.planoPublicado,
+      titulo: 'Seu planejamento alimentar está disponível',
+      mensagem:
+        'Seu nutricionista publicou seu plano alimentar. Abra o app para ver as refeições, porções, substitutos e a lista de compras.',
+      idReferencia: plano.id,
+    });
+    return plano;
   }
 
   @Post(':id/duplicar')

@@ -2,6 +2,7 @@ import { Body, Controller, Delete, Get, Param, ParseIntPipe, Post, Put, Query } 
 import { ApiBearerAuth, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { FormulariosService } from './formularios.service';
 import { FormulariosRecorrenciaService } from './formularios-recorrencia.service';
+import { NotificacoesService, TipoNotificacao } from '../notificacoes/notificacoes.service';
 import { CreateModeloFormularioDto } from './dto/create-modelo-formulario.dto';
 import { UpdateModeloFormularioDto } from './dto/update-modelo-formulario.dto';
 import { CreatePerguntaDto } from './dto/create-pergunta.dto';
@@ -18,6 +19,7 @@ export class FormulariosController {
   constructor(
     private readonly formulariosService: FormulariosService,
     private readonly recorrenciaService: FormulariosRecorrenciaService,
+    private readonly notificacoes: NotificacoesService,
   ) {}
 
   @Post('modelos')
@@ -112,11 +114,24 @@ export class FormulariosController {
 
   @Post('envios')
   @ApiResponse({ status: 201, description: 'Formulário enviado ao paciente' })
-  createEnvio(
+  async createEnvio(
     @Body() dto: CreateEnvioDto,
     @CurrentUser() user: JwtPayloadUser,
   ) {
-    return this.formulariosService.createEnvio(dto, user);
+    const envio = await this.formulariosService.createEnvio(dto, user);
+    // O paciente recebe no app. Sem isso o formulário só existe para quem
+    // receber um link por WhatsApp — justamente o trabalho a evitar.
+    const titulo = envio.modelo?.titulo ?? null;
+    await this.notificacoes.criarSeNovo({
+      idPaciente: dto.idPaciente,
+      tipo: TipoNotificacao.formularioEnviado,
+      titulo: titulo ? `Novo formulário: ${titulo}` : 'Novo formulário de acompanhamento',
+      mensagem: titulo
+        ? `Seu nutricionista enviou o formulário "${titulo}". Responda por aqui mesmo, leva 2 minutos.`
+        : 'Seu nutricionista enviou um formulário de acompanhamento. Responda por aqui mesmo, leva 2 minutos.',
+      idReferencia: envio.id,
+    });
+    return envio;
   }
 
   @Get('envios')
