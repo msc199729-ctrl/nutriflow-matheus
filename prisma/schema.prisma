@@ -215,6 +215,7 @@ model Paciente {
   metas                 Meta[]
   lancamentosFinanceiros LancamentoFinanceiro[]
   calculosEnergeticos   CalculoEnergetico[]
+  notificacoes          Notificacao[]
 
   @@index([workspaceId])
   @@index([idNutricionista])
@@ -782,4 +783,31 @@ model CalculoEnergetico {
 
   @@index([idPaciente])
   @@map("calculos_energeticos")
+}
+
+// ---------------------------------------------------------------------------
+// Caixa de entrada do paciente
+// ---------------------------------------------------------------------------
+
+/// Avisos que o paciente vê no app: plano publicado, formulário enviado,
+/// check-in automático. Persistido, e não mensagem: link em conversa some,
+/// item em caixa de entrada não.
+model Notificacao {
+  id           Int       @id @default(autoincrement())
+  idPaciente   Int       @map("id_paciente")
+  /// Contrato com a tela — usar `TipoNotificacao` de `notificacoes.service.ts`.
+  tipo         String    @db.VarChar(40)
+  titulo       String    @db.VarChar(160)
+  mensagem     String    @db.Text
+  /// Id do plano ou do envio que originou o aviso. Nulo quando não há item.
+  idReferencia Int?      @map("id_referencia")
+  criadoEm     DateTime  @default(now()) @map("criado_em")
+  /// Nulo = não lida. Guardamos a data para ordenar pelo que o paciente
+  /// deixou de ver e medir se o aviso serviu.
+  lidaEm       DateTime? @map("lida_em")
+
+  paciente     Paciente  @relation(fields: [idPaciente], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@index([idPaciente, criadoEm])
+  @@map("notificacoes")
 }
