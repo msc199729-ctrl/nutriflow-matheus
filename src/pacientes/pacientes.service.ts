@@ -146,6 +146,15 @@ export class PacientesService {
     return { id: p.id, idNutricionista: p.idNutricionista };
   }
 
+  /**
+   * Ficha do paciente.
+   *
+   * ATENÇÃO: o próprio paciente também chama este endpoint — o app dele precisa
+   * de nome, celular, meta de água e foto. Por isso, quando quem pede é perfil
+   * `paciente`, a resposta NÃO inclui `notasClinicas` nem `cobrancaMensal`:
+   * nota clínica é anotação interna do nutricionista e cobrança é dado
+   * financeiro da clínica. Antes os dois vazavam para o paciente.
+   */
   async findOne(id: number, user: JwtPayloadUser) {
     const paciente = await this.findPacienteInTenantOrThrow(id, user);
     const [total, responded] = await Promise.all([
@@ -155,7 +164,7 @@ export class PacientesService {
       }),
     ]);
     const adesaoPercentual = total > 0 ? Math.round((responded / total) * 100) : null;
-    return {
+    const resposta = {
       id: paciente.id,
       idNutricionista: paciente.idNutricionista,
       email: paciente.usuario.email,
@@ -183,6 +192,16 @@ export class PacientesService {
       adesaoPercentual,
       criadoEm: paciente.usuario.criadoEm.toISOString(),
     };
+
+    if (user.perfil === PerfilUsuario.paciente) {
+      const {
+        notasClinicas: _notasClinicas,
+        cobrancaMensal: _cobrancaMensal,
+        ...publico
+      } = resposta;
+      return publico;
+    }
+    return resposta;
   }
 
   /**
@@ -327,6 +346,22 @@ export class PacientesService {
 
   async update(id: number, dto: UpdatePacienteDto, user: JwtPayloadUser) {
     await this.findOne(id, user);
+
+    // O paciente edita o próprio cadastro, mas não escreve campo clínico nem
+    // financeiro: `notasClinicas` é anotação do nutricionista e
+    // `cobrancaMensal` é o que a clínica cobra dele. Sem esta trava ele podia
+    // zerar a própria cobrança por PATCH.
+    if (user.perfil === PerfilUsuario.paciente) {
+      if (dto.notasClinicas !== undefined) {
+        throw new ForbiddenException(
+          'Você não pode alterar as anotações clínicas.',
+        );
+      }
+      if (dto.cobrancaMensal !== undefined) {
+        throw new ForbiddenException('Você não pode alterar a cobrança.');
+      }
+    }
+
     const workspaceId = requireWorkspaceId(user);
     const data: Record<string, unknown> = {};
     if (dto.nome !== undefined) data.nome = dto.nome;
