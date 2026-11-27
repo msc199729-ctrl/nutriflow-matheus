@@ -1,0 +1,1034 @@
+From 00b468740415412ea47ce37ca99d139eedee0723 Mon Sep 17 00:00:00 2001
+From: Assistente NutriFlow <assistente@nutriflow.local>
+Date: Fri, 27 Nov 2026 19:28:39 -0300
+Subject: [PATCH 1/2] feat(check-in): tipos de resposta validados, explicacao
+ obrigatoria e fila de pendencias
+
+- Tipos fechados (texto, numero, escala 1-10, multipla_escolha, sim_nao) com
+  @IsIn no DTO e validacao na gravacao: pergunta que o paciente nao consegue
+  responder nao entra no banco.
+- opcoes_json aceita [{rotulo, exigeExplicacao}]: alternativa ruim obriga o
+  paciente a explicar (substituto barato da logica condicional).
+- Resposta ganha coluna explicacao; EnvioFormulario ganha revisado_em.
+- POST /envios/:id/respostas passa a validar obrigatoria, escala, numero,
+  sim_nao e opcao existente (antes so o link publico validava).
+- Fila de pendencias: GET /formularios/pendencias e
+  POST /formularios/pendencias/revisar.
+- Migracao idempotente 20261127230000.
+---
+ .../migration.sql                             |  25 ++
+ prisma/schema.prisma                          |  10 +
+ src/formularios/dto/create-pergunta.dto.ts    |  28 +-
+ src/formularios/dto/marcar-revisados.dto.ts   |  15 +
+ src/formularios/dto/submit-respostas.dto.ts   |   8 +
+ src/formularios/formulario-tipos.ts           | 264 ++++++++++++++++++
+ .../formularios-publico.controller.ts         |   8 +
+ .../formularios-publico.service.ts            |  79 +-----
+ src/formularios/formularios.controller.ts     |  40 ++-
+ src/formularios/formularios.service.ts        | 133 +++++++--
+ src/formularios/respostas.ts                  | 109 ++++++++
+ 11 files changed, 622 insertions(+), 97 deletions(-)
+ create mode 100644 prisma/migrations/20261127230000_add_revisao_e_explicacao/migration.sql
+ create mode 100644 src/formularios/dto/marcar-revisados.dto.ts
+ create mode 100644 src/formularios/formulario-tipos.ts
+ create mode 100644 src/formularios/respostas.ts
+
+diff --git a/prisma/migrations/20261127230000_add_revisao_e_explicacao/migration.sql b/prisma/migrations/20261127230000_add_revisao_e_explicacao/migration.sql
+new file mode 100644
+index 0000000..7ffbfe9
+--- /dev/null
++++ b/prisma/migrations/20261127230000_add_revisao_e_explicacao/migration.sql
+@@ -0,0 +1,25 @@
++-- Fila de pendências e "explicação obrigatória" no check-in.
++--
++-- `revisado_em` no envio: o nutricionista precisa marcar o que já leu. Sem isso
++-- a única visão é uma lista de 25 envios e ele relê os mesmos três toda semana.
++-- A data (e não um booleano) permite medir quanto tempo uma resposta esperou.
++--
++-- `explicacao` na resposta: quando a alternativa escolhida é a ruim, o paciente
++-- é obrigado a dizer por quê. É o substituto barato da lógica condicional —
++-- o mesmo caminho que o LiveClin usa.
++--
++-- Idempotente de propósito: `prisma migrate deploy` roda em produção e uma
++-- coluna criada à mão antes derrubaria a fila com 42701.
++ALTER TABLE "envios_formulario"
++  ADD COLUMN IF NOT EXISTS "revisado_em" TIMESTAMP(3);
++
++ALTER TABLE "respostas"
++  ADD COLUMN IF NOT EXISTS "explicacao" TEXT;
++
++-- Fila de pendências: "deste paciente, respondido e ainda não revisado".
++CREATE INDEX IF NOT EXISTS "envios_formulario_id_paciente_revisado_em_idx"
++  ON "envios_formulario"("id_paciente", "revisado_em");
++
++-- Recorrência: o último envio de cada paciente dentro de um modelo.
++CREATE INDEX IF NOT EXISTS "envios_formulario_id_modelo_enviado_em_idx"
++  ON "envios_formulario"("id_modelo", "enviado_em");
+diff --git a/prisma/schema.prisma b/prisma/schema.prisma
+index 5589f8b..92a3d14 100644
+--- a/prisma/schema.prisma
++++ b/prisma/schema.prisma
+@@ -608,11 +608,19 @@ model EnvioFormulario {
+   enviadoEm    DateTime? @map("enviado_em")
+   respondidoEm DateTime? @map("respondido_em")
+   status       String?
++  /// Quando o nutricionista marcou esta resposta como lida/revisada.
++  /// Nulo = ainda na fila de pendências. Data, e não booleano, para saber
++  /// quanto tempo uma resposta ficou esperando.
++  revisadoEm   DateTime? @map("revisado_em")
+ 
+   paciente  Paciente  @relation(fields: [idPaciente], references: [id], onDelete: Cascade)
+   modelo    ModeloFormulario @relation(fields: [idModelo], references: [id], onDelete: Restrict)
+   respostas Resposta[]
+ 
++  /// A fila de pendências consulta "respondido e não revisado" por paciente.
++  @@index([idPaciente, revisadoEm])
++  /// A recorrência procura o último envio de cada paciente por modelo.
++  @@index([idModelo, enviadoEm])
+   @@map("envios_formulario")
+ }
+ 
+@@ -621,6 +629,8 @@ model Resposta {
+   idEnvio      Int    @map("id_envio")
+   idPergunta   Int    @map("id_pergunta")
+   valorResposta String? @db.Text @map("valor_resposta")
++  /// Comentário obrigatório quando a alternativa escolhida pede explicação.
++  explicacao   String? @db.Text @map("explicacao")
+ 
+   envio    EnvioFormulario @relation(fields: [idEnvio], references: [id], onDelete: Cascade)
+   pergunta Pergunta        @relation(fields: [idPergunta], references: [id], onDelete: Restrict)
+diff --git a/src/formularios/dto/create-pergunta.dto.ts b/src/formularios/dto/create-pergunta.dto.ts
+index 3e71a89..baebfb6 100644
+--- a/src/formularios/dto/create-pergunta.dto.ts
++++ b/src/formularios/dto/create-pergunta.dto.ts
+@@ -1,5 +1,12 @@
+ import { ApiPropertyOptional } from '@nestjs/swagger';
+-import { IsArray, IsBoolean, IsOptional, IsString } from 'class-validator';
++import {
++  IsArray,
++  IsBoolean,
++  IsIn,
++  IsOptional,
++  IsString,
++} from 'class-validator';
++import { TIPOS_RESPOSTA } from '../formulario-tipos';
+ 
+ export class CreatePerguntaDto {
+   @ApiPropertyOptional()
+@@ -7,9 +14,15 @@ export class CreatePerguntaDto {
+   @IsString()
+   textoPergunta?: string;
+ 
+-  @ApiPropertyOptional({ description: 'Ex: texto, numero, multipla_escolha' })
++  @ApiPropertyOptional({
++    enum: TIPOS_RESPOSTA,
++    description:
++      'Um destes: texto, numero, escala (1–10), multipla_escolha, sim_nao',
++  })
+   @IsOptional()
+-  @IsString()
++  @IsIn(TIPOS_RESPOSTA as unknown as string[], {
++    message: `tipoResposta deve ser um de: ${TIPOS_RESPOSTA.join(', ')}`,
++  })
+   tipoResposta?: string;
+ 
+   @ApiPropertyOptional({ description: 'Tag para análise por IA' })
+@@ -19,13 +32,16 @@ export class CreatePerguntaDto {
+ 
+   @ApiPropertyOptional({
+     description:
+-      'Rótulos das opções para múltipla escolha (ordem = ordem exibida ao paciente)',
++      'Alternativas, na ordem exibida. Aceita ["Sim","Não"] ou ' +
++      '[{ "rotulo": "Nenhuma porção", "exigeExplicacao": true }]. ' +
++      'Com exigeExplicacao, o paciente é obrigado a comentar a escolha.',
+     type: [String],
+   })
+   @IsOptional()
+   @IsArray()
+-  @IsString({ each: true })
+-  opcoes?: string[];
++  opcoes?: Array<
++    string | { rotulo: string; exigeExplicacao?: boolean }
++  >;
+ 
+   @ApiPropertyOptional({ description: 'Se a resposta é obrigatória' })
+   @IsOptional()
+diff --git a/src/formularios/dto/marcar-revisados.dto.ts b/src/formularios/dto/marcar-revisados.dto.ts
+new file mode 100644
+index 0000000..e8e8b20
+--- /dev/null
++++ b/src/formularios/dto/marcar-revisados.dto.ts
+@@ -0,0 +1,15 @@
++import { ApiProperty } from '@nestjs/swagger';
++import { ArrayMaxSize, ArrayNotEmpty, IsArray, IsInt, Min } from 'class-validator';
++
++export class MarcarRevisadosDto {
++  @ApiProperty({
++    description: 'IDs dos envios respondidos que o nutricionista já leu',
++    type: [Number],
++  })
++  @IsArray()
++  @ArrayNotEmpty()
++  @ArrayMaxSize(200)
++  @IsInt({ each: true })
++  @Min(1, { each: true })
++  idsEnvio: number[];
++}
+diff --git a/src/formularios/dto/submit-respostas.dto.ts b/src/formularios/dto/submit-respostas.dto.ts
+index fd2e9c3..c8b80f4 100644
+--- a/src/formularios/dto/submit-respostas.dto.ts
++++ b/src/formularios/dto/submit-respostas.dto.ts
+@@ -19,6 +19,14 @@ export class RespostaItemDto {
+   @IsOptional()
+   @IsString()
+   valorResposta?: string;
++
++  @ApiPropertyOptional({
++    description:
++      'Comentário do paciente — obrigatório quando a alternativa escolhida pede explicação',
++  })
++  @IsOptional()
++  @IsString()
++  explicacao?: string;
+ }
+ 
+ export class SubmitRespostasDto {
+diff --git a/src/formularios/formulario-tipos.ts b/src/formularios/formulario-tipos.ts
+new file mode 100644
+index 0000000..7bd5c55
+--- /dev/null
++++ b/src/formularios/formulario-tipos.ts
+@@ -0,0 +1,264 @@
++import { BadRequestException } from '@nestjs/common';
++import { Prisma } from '@prisma/client';
++
++/**
++ * Contrato entre o que o construtor grava, o que a página pública desenha e o
++ * que o servidor aceita como resposta.
++ *
++ * Antes disto `tipoResposta` era string livre: um typo ("multipla escolha" com
++ * espaço) virava um tipo que nada reconhece e a pergunta não renderizava. Aqui
++ * a lista é fechada e a validação acontece no servidor, não na tela.
++ */
++export const TIPOS_RESPOSTA = [
++  'texto',
++  'numero',
++  'escala',
++  'multipla_escolha',
++  'sim_nao',
++] as const;
++
++export type TipoResposta = (typeof TIPOS_RESPOSTA)[number];
++
++export const TIPO_PADRAO: TipoResposta = 'texto';
++
++/** Escala fixa 1–10, que é o que as duas telas já desenham. */
++export const ESCALA_MIN = 1;
++export const ESCALA_MAX = 10;
++
++export const OPCOES_SIM_NAO = ['Sim', 'Não'] as const;
++
++/** Rótulos legíveis, para mensagem de erro e para o painel. */
++export const ROTULO_TIPO: Record<TipoResposta, string> = {
++  texto: 'Texto',
++  numero: 'Número',
++  escala: 'Escala 1 a 10',
++  multipla_escolha: 'Múltipla escolha',
++  sim_nao: 'Sim/Não',
++};
++
++export interface OpcaoPergunta {
++  rotulo: string;
++  /**
++   * A sacada que substitui lógica condicional (copiada do LiveClin): a
++   * alternativa ruim obriga o paciente a explicar. 80% do valor por 10% do
++   * custo — sem motor de ramificação.
++   */
++  exigeExplicacao: boolean;
++}
++
++export function ehTipoResposta(valor: unknown): valor is TipoResposta {
++  return (
++    typeof valor === 'string' &&
++    (TIPOS_RESPOSTA as readonly string[]).includes(valor)
++  );
++}
++
++/**
++ * Normaliza `opcoes_json` nas duas formas que existem no banco:
++ *  - `["Sim","Não"]` (modelos antigos e o construtor atual)
++ *  - `[{ "rotulo": "Nenhuma", "exigeExplicacao": true }]`
++ * Devolve `null` quando o campo não é um array válido — quem chama decide se
++ * isso é erro de gravação ou só "sem opções".
++ */
++export function normalizarOpcoes(raw: unknown): OpcaoPergunta[] | null {
++  if (raw == null) return null;
++  if (!Array.isArray(raw)) return null;
++  const saida: OpcaoPergunta[] = [];
++  for (const item of raw) {
++    if (typeof item === 'string') {
++      const rotulo = item.trim();
++      if (!rotulo) continue;
++      saida.push({ rotulo, exigeExplicacao: false });
++      continue;
++    }
++    if (item && typeof item === 'object') {
++      const obj = item as { rotulo?: unknown; exigeExplicacao?: unknown };
++      if (typeof obj.rotulo !== 'string') return null;
++      const rotulo = obj.rotulo.trim();
++      if (!rotulo) continue;
++      saida.push({
++        rotulo,
++        exigeExplicacao: obj.exigeExplicacao === true,
++      });
++      continue;
++    }
++    return null;
++  }
++  return saida.length > 0 ? saida : null;
++}
++
++/**
++ * Só grava a forma "objeto" quando alguma alternativa exige explicação; caso
++ * contrário mantém `string[]`, que é o que os modelos antigos têm e o que a
++ * lista simples consegue ler.
++ */
++export function opcoesParaJson(
++  opcoes: OpcaoPergunta[] | null,
++): Prisma.InputJsonValue | typeof Prisma.DbNull {
++  if (opcoes == null || opcoes.length === 0) return Prisma.DbNull;
++  const algumaExplicacao = opcoes.some((o) => o.exigeExplicacao);
++  if (!algumaExplicacao) {
++    return opcoes.map((o) => o.rotulo);
++  }
++  return opcoes.map((o) => ({
++    rotulo: o.rotulo,
++    exigeExplicacao: o.exigeExplicacao,
++  }));
++}
++
++export interface PerguntaValidada {
++  tipoResposta: TipoResposta;
++  opcoes: OpcaoPergunta[] | null;
++  opcoesJson: Prisma.InputJsonValue | typeof Prisma.DbNull;
++}
++
++/**
++ * Regras de gravação de pergunta. Falha aqui é 400 imediato: melhor recusar a
++ * pergunta do que guardar uma que o paciente não consegue responder.
++ */
++export function validarPergunta(input: {
++  tipoResposta?: unknown;
++  opcoes?: unknown;
++}): PerguntaValidada {
++  const bruto = input.tipoResposta ?? TIPO_PADRAO;
++  if (!ehTipoResposta(bruto)) {
++    throw new BadRequestException(
++      `Tipo de resposta inválido. Use um destes: ${TIPOS_RESPOSTA.join(', ')}.`,
++    );
++  }
++
++  const informadas = input.opcoes == null ? null : normalizarOpcoes(input.opcoes);
++  if (input.opcoes != null && informadas == null) {
++    throw new BadRequestException(
++      'Opções inválidas: envie uma lista de textos ou de objetos { rotulo, exigeExplicacao }.',
++    );
++  }
++
++  if (bruto === 'multipla_escolha') {
++    if (informadas == null || informadas.length < 2) {
++      throw new BadRequestException(
++        'Múltipla escolha precisa de pelo menos duas opções.',
++      );
++    }
++    const rotulos = informadas.map((o) => o.rotulo.toLowerCase());
++    if (new Set(rotulos).size !== rotulos.length) {
++      throw new BadRequestException('Há opções repetidas nesta pergunta.');
++    }
++    return {
++      tipoResposta: bruto,
++      opcoes: informadas,
++      opcoesJson: opcoesParaJson(informadas),
++    };
++  }
++
++  // Sim/Não não precisa de opções gravadas: as duas são fixas e conhecidas.
++  if (bruto === 'sim_nao') {
++    return { tipoResposta: bruto, opcoes: null, opcoesJson: Prisma.DbNull };
++  }
++
++  // Texto, número e escala não têm alternativas. Gravar opções aqui só
++  // confundiria quem for ler depois.
++  return { tipoResposta: bruto, opcoes: null, opcoesJson: Prisma.DbNull };
++}
++
++export interface RespostaValidada {
++  valor: string;
++  explicacao: string | null;
++}
++
++interface PerguntaParaValidar {
++  id: number;
++  textoPergunta: string | null;
++  tipoResposta: string | null;
++  opcoesJson: Prisma.JsonValue | null;
++  obrigatoria: boolean;
++}
++
++/**
++ * Valida o valor de UMA pergunta e devolve o que deve ser gravado.
++ *
++ * Usada tanto pelo link público quanto pelo `POST /envios/:id/respostas`
++ * autenticado — antes só a tela checava obrigatória, então dava para gravar envio
++ * "respondido" em branco por fora da tela.
++ */
++export function validarResposta(
++  pergunta: PerguntaParaValidar,
++  valorBruto: unknown,
++  explicacaoBruta: unknown,
++): RespostaValidada | null {
++  const rotulo = pergunta.textoPergunta ?? `#${pergunta.id}`;
++  const valor = typeof valorBruto === 'string' ? valorBruto.trim() : '';
++  const explicacao =
++    typeof explicacaoBruta === 'string' ? explicacaoBruta.trim() : '';
++
++  if (valor === '') {
++    if (pergunta.obrigatoria) {
++      throw new BadRequestException(`Responda a pergunta obrigatória: ${rotulo}`);
++    }
++    return null;
++  }
++
++  const tipo = ehTipoResposta(pergunta.tipoResposta)
++    ? pergunta.tipoResposta
++    : TIPO_PADRAO;
++  let opcoes: OpcaoPergunta[] | null = null;
++
++  switch (tipo) {
++    case 'numero': {
++      const n = Number(valor.replace(',', '.'));
++      if (!Number.isFinite(n)) {
++        throw new BadRequestException(`"${rotulo}" precisa ser um número.`);
++      }
++      if (n < 0) {
++        throw new BadRequestException(`"${rotulo}" não pode ser negativo.`);
++      }
++      return { valor: String(n), explicacao: null };
++    }
++
++    case 'escala': {
++      const n = Number.parseInt(valor, 10);
++      if (!Number.isFinite(n) || n < ESCALA_MIN || n > ESCALA_MAX) {
++        throw new BadRequestException(
++          `"${rotulo}" deve ser um número de ${ESCALA_MIN} a ${ESCALA_MAX}.`,
++        );
++      }
++      return { valor: String(n), explicacao: null };
++    }
++
++    case 'sim_nao': {
++      if (valor !== 'Sim' && valor !== 'Não') {
++        throw new BadRequestException(`"${rotulo}" aceita apenas Sim ou Não.`);
++      }
++      return { valor, explicacao: null };
++    }
++
++    case 'multipla_escolha': {
++      opcoes = normalizarOpcoes(pergunta.opcoesJson);
++      if (opcoes == null || opcoes.length === 0) {
++        throw new BadRequestException(
++          `"${rotulo}" está sem opções configuradas. Avisa o nutricionista.`,
++        );
++      }
++      const escolhida = opcoes.find((o) => o.rotulo === valor);
++      if (!escolhida) {
++        throw new BadRequestException(
++          `"${rotulo}": a resposta "${valor}" não está entre as opções.`,
++        );
++      }
++      if (escolhida.exigeExplicacao && explicacao === '') {
++        throw new BadRequestException(
++          `Explique sua resposta em "${rotulo}": a alternativa escolhida pede um comentário.`,
++        );
++      }
++      return {
++        valor,
++        explicacao: escolhida.exigeExplicacao ? explicacao : null,
++      };
++    }
++
++    default:
++      // Texto livre: limite alto o bastante para um relato, baixo o bastante
++      // para não virar despejo de arquivo no banco.
++      return { valor: valor.slice(0, 4000), explicacao: null };
++  }
++}
+diff --git a/src/formularios/formularios-publico.controller.ts b/src/formularios/formularios-publico.controller.ts
+index 2a15f53..6570a7a 100644
+--- a/src/formularios/formularios-publico.controller.ts
++++ b/src/formularios/formularios-publico.controller.ts
+@@ -39,6 +39,14 @@ class RespostaPublicaItemDto {
+   @IsOptional()
+   @IsString()
+   valorResposta?: string;
++
++  @ApiPropertyOptional({
++    description:
++      'Comentário do paciente — obrigatório quando a alternativa pede explicação',
++  })
++  @IsOptional()
++  @IsString()
++  explicacao?: string;
+ }
+ 
+ class SubmitRespostasPublicoDto {
+diff --git a/src/formularios/formularios-publico.service.ts b/src/formularios/formularios-publico.service.ts
+index 97c410a..5b4b386 100644
+--- a/src/formularios/formularios-publico.service.ts
++++ b/src/formularios/formularios-publico.service.ts
+@@ -9,6 +9,8 @@ import {
+ import { createHmac, timingSafeEqual } from 'node:crypto';
+ import { PerfilUsuario, Prisma } from '@prisma/client';
+ import { PrismaService } from '../prisma/prisma.service';
++import { normalizarOpcoes } from './formulario-tipos';
++import { salvarRespostas } from './respostas';
+ import type { JwtPayloadUser } from '../common/decorators/current-user.decorator';
+ import { isAdminSistema, requireWorkspaceId } from '../common/tenant/tenant-scope';
+ 
+@@ -119,7 +121,9 @@ export class FormulariosPublicoService {
+       include: {
+         modelo: { include: { perguntas: { orderBy: { id: 'asc' } } } },
+         paciente: { select: { id: true, nome: true } },
+-        respostas: { select: { idPergunta: true, valorResposta: true } },
++        respostas: {
++          select: { idPergunta: true, valorResposta: true, explicacao: true },
++        },
+       },
+     });
+     if (!envio) throw new NotFoundException('Formulário não encontrado');
+@@ -135,12 +139,15 @@ export class FormulariosPublicoService {
+         id: p.id,
+         textoPergunta: p.textoPergunta,
+         tipoResposta: p.tipoResposta,
+-        opcoes: this.parseOpcoes(p.opcoesJson),
++        // Forma normalizada (rotulo + exigeExplicacao): o paciente precisa saber
++        // qual alternativa obriga comentário ANTES de enviar.
++        opcoes: normalizarOpcoes(p.opcoesJson) ?? [],
+         obrigatoria: p.obrigatoria,
+       })),
+       respostas: envio.respostas.map((r) => ({
+         idPergunta: r.idPergunta,
+         valorResposta: r.valorResposta,
++        explicacao: r.explicacao ?? null,
+       })),
+     };
+   }
+@@ -148,63 +155,14 @@ export class FormulariosPublicoService {
+   /** Respostas enviadas pelo paciente pelo link público. */
+   async submitPublico(
+     token: string,
+-    respostas: Array<{ idPergunta: number; valorResposta?: string }>,
++    respostas: Array<{
++      idPergunta: number;
++      valorResposta?: string;
++      explicacao?: string;
++    }>,
+   ) {
+     const idEnvio = this.validarToken(token);
+-    const envio = await this.prisma.envioFormulario.findUnique({
+-      where: { id: idEnvio },
+-      include: { modelo: { include: { perguntas: true } } },
+-    });
+-    if (!envio) throw new NotFoundException('Formulário não encontrado');
+-
+-    const perguntas = new Map(envio.modelo.perguntas.map((p) => [p.id, p]));
+-    const porPergunta = new Map<number, string>();
+-    for (const r of respostas ?? []) {
+-      if (!perguntas.has(r.idPergunta)) {
+-        throw new BadRequestException(
+-          `A pergunta ${r.idPergunta} não pertence a este formulário`,
+-        );
+-      }
+-      const valor = (r.valorResposta ?? '').trim();
+-      if (valor !== '') porPergunta.set(r.idPergunta, valor);
+-    }
+-
+-    const faltando = envio.modelo.perguntas.filter(
+-      (p) => p.obrigatoria && !porPergunta.has(p.id),
+-    );
+-    if (faltando.length > 0) {
+-      throw new BadRequestException(
+-        `Responda as perguntas obrigatórias: ${faltando
+-          .map((p) => p.textoPergunta ?? `#${p.id}`)
+-          .join('; ')}`,
+-      );
+-    }
+-
+-    const agora = new Date();
+-    await this.prisma.$transaction([
+-      this.prisma.resposta.deleteMany({ where: { idEnvio } }),
+-      ...(porPergunta.size > 0
+-        ? [
+-            this.prisma.resposta.createMany({
+-              data: [...porPergunta.entries()].map(([idPergunta, valorResposta]) => ({
+-                idEnvio,
+-                idPergunta,
+-                valorResposta,
+-              })),
+-            }),
+-          ]
+-        : []),
+-      this.prisma.envioFormulario.update({
+-        where: { id: idEnvio },
+-        data: {
+-          // mantém a data da primeira resposta; reenvio não reescreve o histórico
+-          respondidoEm: envio.respondidoEm ?? agora,
+-          status: 'respondido',
+-        },
+-      }),
+-    ]);
+-
+-    return { ok: true, idEnvio, respondidoEm: envio.respondidoEm ?? agora };
++    return salvarRespostas(this.prisma, idEnvio, respostas ?? []);
+   }
+ 
+   private primeiroNome(nome: string | null): string | null {
+@@ -213,11 +171,4 @@ export class FormulariosPublicoService {
+     return t.split(/\s+/)[0];
+   }
+ 
+-  private parseOpcoes(raw: Prisma.JsonValue | null): string[] | null {
+-    if (raw == null) return null;
+-    if (Array.isArray(raw) && raw.every((x) => typeof x === 'string')) {
+-      return raw as string[];
+-    }
+-    return null;
+-  }
+ }
+diff --git a/src/formularios/formularios.controller.ts b/src/formularios/formularios.controller.ts
+index ffbad1e..7a8227a 100644
+--- a/src/formularios/formularios.controller.ts
++++ b/src/formularios/formularios.controller.ts
+@@ -1,4 +1,14 @@
+-import { Body, Controller, Delete, Get, Param, ParseIntPipe, Post, Put, Query } from '@nestjs/common';
++import {
++  Body,
++  Controller,
++  Delete,
++  Get,
++  Param,
++  ParseIntPipe,
++  Post,
++  Put,
++  Query,
++} from '@nestjs/common';
+ import { ApiBearerAuth, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
+ import { FormulariosService } from './formularios.service';
+ import { FormulariosRecorrenciaService } from './formularios-recorrencia.service';
+@@ -9,6 +19,7 @@ import { CreatePerguntaDto } from './dto/create-pergunta.dto';
+ import { UpdatePerguntaDto } from './dto/update-pergunta.dto';
+ import { CreateEnvioDto } from './dto/create-envio.dto';
+ import { SubmitRespostasDto } from './dto/submit-respostas.dto';
++import { MarcarRevisadosDto } from './dto/marcar-revisados.dto';
+ import { CurrentUser } from '../common/decorators/current-user.decorator';
+ import type { JwtPayloadUser } from '../common/decorators/current-user.decorator';
+ 
+@@ -48,6 +59,33 @@ export class FormulariosController {
+     return this.recorrenciaService.previsao(user);
+   }
+ 
++  @Get('pendencias')
++  @ApiQuery({ name: 'idModelo', required: false, type: Number })
++  @ApiResponse({
++    status: 200,
++    description:
++      'Respostas que chegaram e ainda não foram marcadas como revisadas (fila de pendências)',
++  })
++  pendencias(
++    @Query('idModelo') idModelo: string | undefined,
++    @CurrentUser() user: JwtPayloadUser,
++  ) {
++    const id = idModelo ? Number.parseInt(idModelo, 10) : NaN;
++    return this.formulariosService.pendencias(
++      user,
++      Number.isFinite(id) && id > 0 ? id : undefined,
++    );
++  }
++
++  @Post('pendencias/revisar')
++  @ApiResponse({ status: 201, description: 'Envios marcados como revisados' })
++  marcarRevisados(
++    @Body() dto: MarcarRevisadosDto,
++    @CurrentUser() user: JwtPayloadUser,
++  ) {
++    return this.formulariosService.marcarRevisados(dto.idsEnvio, user);
++  }
++
+   @Get('modelos')
+   @ApiResponse({ status: 200, description: 'Lista de modelos' })
+   findAllModelos(@CurrentUser() user: JwtPayloadUser) {
+diff --git a/src/formularios/formularios.service.ts b/src/formularios/formularios.service.ts
+index 9881b1c..62c382a 100644
+--- a/src/formularios/formularios.service.ts
++++ b/src/formularios/formularios.service.ts
+@@ -16,6 +16,8 @@ import { CreatePerguntaDto } from './dto/create-pergunta.dto';
+ import { UpdatePerguntaDto } from './dto/update-pergunta.dto';
+ import { CreateEnvioDto } from './dto/create-envio.dto';
+ import { SubmitRespostasDto } from './dto/submit-respostas.dto';
++import { normalizarOpcoes, validarPergunta } from './formulario-tipos';
++import { salvarRespostas } from './respostas';
+ 
+ @Injectable()
+ export class FormulariosService {
+@@ -170,18 +172,20 @@ export class FormulariosService {
+ 
+   async createPergunta(idModelo: number, dto: CreatePerguntaDto, user: JwtPayloadUser) {
+     await this.ensureModeloNoTenant(idModelo, user);
+-    const opcoesJson =
+-      dto.opcoes != null && dto.opcoes.length > 0
+-        ? (dto.opcoes as Prisma.InputJsonValue)
+-        : undefined;
++    // Tipo fechado e opções conferidas aqui, não na tela: pergunta que o
++    // paciente não consegue responder não deve nem entrar no banco.
++    const validada = validarPergunta({
++      tipoResposta: dto.tipoResposta,
++      opcoes: dto.opcoes,
++    });
+     return this.prisma.pergunta.create({
+       data: {
+         idModelo,
+         textoPergunta: dto.textoPergunta ?? null,
+-        tipoResposta: dto.tipoResposta ?? null,
++        tipoResposta: validada.tipoResposta,
+         tagAnalise: dto.tagAnalise ?? null,
+         obrigatoria: dto.obrigatoria ?? false,
+-        ...(opcoesJson !== undefined ? { opcoesJson } : {}),
++        opcoesJson: validada.opcoesJson,
+       },
+     });
+   }
+@@ -192,16 +196,25 @@ export class FormulariosService {
+     await this.ensureModeloNoTenant(pergunta.idModelo, user);
+     const data: Prisma.PerguntaUpdateInput = {
+       textoPergunta: dto.textoPergunta,
+-      tipoResposta: dto.tipoResposta,
+       tagAnalise: dto.tagAnalise,
+     };
+     if (dto.obrigatoria !== undefined) {
+       data.obrigatoria = dto.obrigatoria;
+     }
+-    if (dto.opcoes !== undefined) {
+-      data.opcoesJson =
+-        dto.opcoes.length > 0 ? (dto.opcoes as Prisma.InputJsonValue) : Prisma.DbNull;
++
++    // Tipo e opções andam juntos: trocar para múltipla escolha sem opções é o
++    // mesmo bug que a string livre causava, só que na edição.
++    const tipoFinal = dto.tipoResposta ?? pergunta.tipoResposta ?? 'texto';
++    const opcoesFinal =
++      dto.opcoes !== undefined ? dto.opcoes : normalizarOpcoes(pergunta.opcoesJson);
++    const validada = validarPergunta({ tipoResposta: tipoFinal, opcoes: opcoesFinal });
++    if (dto.tipoResposta !== undefined) {
++      data.tipoResposta = validada.tipoResposta;
++    }
++    if (dto.tipoResposta !== undefined || dto.opcoes !== undefined) {
++      data.opcoesJson = validada.opcoesJson;
+     }
++
+     return this.prisma.pergunta.update({
+       where: { id },
+       data,
+@@ -275,24 +288,92 @@ export class FormulariosService {
+     if (envio.idPaciente !== user.sub && !isAdminSistema(user)) {
+       throw new ForbiddenException('Apenas o paciente pode enviar as respostas');
+     }
+-    await this.prisma.resposta.deleteMany({ where: { idEnvio } });
+-    if (dto.respostas.length > 0) {
+-      await this.prisma.resposta.createMany({
+-        data: dto.respostas.map((r) => ({
+-          idEnvio,
+-          idPergunta: r.idPergunta,
+-          valorResposta: r.valorResposta ?? null,
+-        })),
+-      });
+-    }
+-    await this.prisma.envioFormulario.update({
+-      where: { id: idEnvio },
+-      data: { respondidoEm: new Date(), status: 'respondido' },
++    const tempo = await salvarRespostas(this.prisma, idEnvio, dto.respostas ?? []);
++    return {
++      ...tempo,
++      envio: await this.prisma.envioFormulario.findUnique({
++        where: { id: idEnvio },
++        include: { respostas: true, modelo: { include: { perguntas: true } } },
++      }),
++    };
++  }
++
++  /**
++   * Fila de pendências: envios respondidos que o nutricionista ainda não marcou
++   * como revisados. O custo real do check-in não é enviar, é ler 25 respostas —
++   * sem esta lista o painel mostra tudo outra vez toda semana.
++   */
++  async pendencias(user: JwtPayloadUser, idModelo?: number) {
++    const escopo = this.escopoDoProfissional(user);
++    if (escopo == null) return { total: 0, itens: [], naoLidasTotal: 0 };
++
++    const envios = await this.prisma.envioFormulario.findMany({
++      where: {
++        paciente: escopo,
++        respondidoEm: { not: null },
++        revisadoEm: null,
++        ...(idModelo != null ? { idModelo } : {}),
++      },
++      include: {
++        modelo: { select: { id: true, titulo: true } },
++        paciente: { select: { id: true, nome: true } },
++        _count: { select: { respostas: true } },
++      },
++      orderBy: { respondidoEm: 'asc' },
++      take: 200,
+     });
+-    return this.prisma.envioFormulario.findUnique({
+-      where: { id: idEnvio },
+-      include: { respostas: true, modelo: { include: { perguntas: true } } },
++
++    // Quem respondeu mas nunca teve a resposta aberta: é o que o contador do
++    // menu mostra. Pendente já revisado não conta mais.
++    const total = envios.length;
++    const agora = Date.now();
++    return {
++      total,
++      naoLidasTotal: total,
++      itens: envios.map((e) => ({
++        idEnvio: e.id,
++        idPaciente: e.idPaciente,
++        pacienteNome: e.paciente?.nome ?? null,
++        idModelo: e.idModelo,
++        modeloTitulo: e.modelo?.titulo ?? null,
++        respondidoEm: e.respondidoEm,
++        horasEsperando: e.respondidoEm
++          ? Math.floor((agora - e.respondidoEm.getTime()) / 3_600_000)
++          : null,
++        totalRespostas: e._count.respostas,
++      })),
++    };
++  }
++
++  /** Marca envios como revisados (limpa a fila). Idempotente. */
++  async marcarRevisados(ids: number[], user: JwtPayloadUser) {
++    const escopo = this.escopoDoProfissional(user);
++    if (escopo == null) {
++      throw new ForbiddenException('Acesso negado');
++    }
++    const agora = new Date();
++    const resultado = await this.prisma.envioFormulario.updateMany({
++      where: {
++        id: { in: ids },
++        paciente: escopo,
++        respondidoEm: { not: null },
++        revisadoEm: null,
++      },
++      data: { revisadoEm: agora },
+     });
++    return { atualizados: resultado.count, revisadoEm: agora };
++  }
++
++  /** Escopo de pacientes do profissional logado; `null` = não pode ver nada. */
++  private escopoDoProfissional(
++    user: JwtPayloadUser,
++  ): Prisma.PacienteWhereInput | null {
++    if (isAdminSistema(user)) return {};
++    if (!this.podeGerirModelos(user)) return null;
++    const wid = requireWorkspaceId(user);
++    return user.perfil === PerfilUsuario.nutricionista
++      ? { workspaceId: wid, idNutricionista: user.sub }
++      : { workspaceId: wid };
+   }
+ 
+   async getStats(user: JwtPayloadUser) {
+diff --git a/src/formularios/respostas.ts b/src/formularios/respostas.ts
+new file mode 100644
+index 0000000..2a39649
+--- /dev/null
++++ b/src/formularios/respostas.ts
+@@ -0,0 +1,109 @@
++import { BadRequestException } from '@nestjs/common';
++import { Prisma } from '@prisma/client';
++import type { PrismaService } from '../prisma/prisma.service';
++import { normalizarOpcoes, validarResposta } from './formulario-tipos';
++
++/**
++ * Gravação de respostas — um caminho só para o link público e para o
++ * `POST /envios/:id/respostas` autenticado.
++ *
++ * Antes o link público validava e a rota autenticada não: dava para gravar um
++ * envio "respondido" com pergunta obrigatória em branco passando por fora da
++ * tela. Duas portas para o mesmo dado clínico têm de aplicar a mesma regra.
++ */
++export async function salvarRespostas(
++  prisma: PrismaService,
++  idEnvio: number,
++  respostas: Array<{
++    idPergunta: number;
++    valorResposta?: string;
++    explicacao?: string;
++  }>,
++): Promise<{ ok: true; idEnvio: number; respondidoEm: Date; total: number }> {
++  const envio = await prisma.envioFormulario.findUnique({
++    where: { id: idEnvio },
++    include: { modelo: { include: { perguntas: true } } },
++  });
++  if (!envio) throw new BadRequestException('Envio não encontrado');
++
++  const perguntas = new Map(envio.modelo.perguntas.map((p) => [p.id, p]));
++  const validas: Array<{
++    idPergunta: number;
++    valorResposta: string;
++    explicacao: string | null;
++  }> = [];
++
++  const vistas = new Set<number>();
++  for (const r of respostas ?? []) {
++    const pergunta = perguntas.get(r.idPergunta);
++    if (!pergunta) {
++      throw new BadRequestException(
++        `A pergunta ${r.idPergunta} não pertence a este formulário`,
++      );
++    }
++    if (vistas.has(r.idPergunta)) {
++      throw new BadRequestException(
++        `A pergunta ${r.idPergunta} foi enviada mais de uma vez`,
++      );
++    }
++    vistas.add(r.idPergunta);
++
++    const validada = validarResposta(pergunta, r.valorResposta, r.explicacao);
++    if (validada) {
++      validas.push({
++        idPergunta: r.idPergunta,
++        valorResposta: validada.valor,
++        explicacao: validada.explicacao,
++      });
++    }
++  }
++
++  // Obrigatória não respondida: o servidor recusa. Antes só a tela checava e
++  // um envio em branco entrava como "respondido".
++  const faltando = envio.modelo.perguntas.filter(
++    (p) => p.obrigatoria && !validas.some((v) => v.idPergunta === p.id),
++  );
++  if (faltando.length > 0) {
++    throw new BadRequestException(
++      `Responda as perguntas obrigatórias: ${faltando
++        .map((p) => p.textoPergunta ?? `#${p.id}`)
++        .join('; ')}`,
++    );
++  }
++
++  const agora = new Date();
++  await prisma.$transaction([
++    prisma.resposta.deleteMany({ where: { idEnvio } }),
++    ...(validas.length > 0
++      ? [
++          prisma.resposta.createMany({
++            data: validas.map((v) => ({
++              idEnvio,
++              idPergunta: v.idPergunta,
++              valorResposta: v.valorResposta,
++              explicacao: v.explicacao,
++            })),
++          }),
++        ]
++      : []),
++    prisma.envioFormulario.update({
++      where: { id: idEnvio },
++      data: {
++        // Mantém a data da primeira resposta: reenvio não reescreve histórico.
++        respondidoEm: envio.respondidoEm ?? agora,
++        status: 'respondido',
++        // Resposta nova volta para a fila: o nutricionista precisa reler.
++        revisadoEm: null,
++      },
++    }),
++  ]);
++
++  return {
++    ok: true,
++    idEnvio,
++    respondidoEm: envio.respondidoEm ?? agora,
++    total: validas.length,
++  };
++}
++
++export { normalizarOpcoes };
+--
+2.54.0
+
+
+From ed9e45028aaff2daa989c1c3fdd44248ca98b320 Mon Sep 17 00:00:00 2001
+From: Assistente NutriFlow <assistente@nutriflow.local>
+Date: Fri, 27 Nov 2026 19:36:17 -0300
+Subject: [PATCH 2/2] fix(check-in): submitRespostas mantem o formato de
+ retorno antigo
+
+---
+ .../formularios-publico.service.ts            |  8 ++++---
+ src/formularios/formularios.service.ts        | 22 ++++++++++++-------
+ 2 files changed, 19 insertions(+), 11 deletions(-)
+
+diff --git a/src/formularios/formularios-publico.service.ts b/src/formularios/formularios-publico.service.ts
+index 5b4b386..0c90a36 100644
+--- a/src/formularios/formularios-publico.service.ts
++++ b/src/formularios/formularios-publico.service.ts
+@@ -139,9 +139,11 @@ export class FormulariosPublicoService {
+         id: p.id,
+         textoPergunta: p.textoPergunta,
+         tipoResposta: p.tipoResposta,
+-        // Forma normalizada (rotulo + exigeExplicacao): o paciente precisa saber
+-        // qual alternativa obriga comentário ANTES de enviar.
+-        opcoes: normalizarOpcoes(p.opcoesJson) ?? [],
++        // `opcoes` segue string[] para a tela atual não quebrar (ela desenha
++        // botões com o rótulo); `opcoesDetalhe` carrega o exigeExplicacao, que
++        // é o que o paciente precisa ver ANTES de escolher.
++        opcoes: (normalizarOpcoes(p.opcoesJson) ?? []).map((o) => o.rotulo),
++        opcoesDetalhe: normalizarOpcoes(p.opcoesJson) ?? [],
+         obrigatoria: p.obrigatoria,
+       })),
+       respostas: envio.respostas.map((r) => ({
+diff --git a/src/formularios/formularios.service.ts b/src/formularios/formularios.service.ts
+index 62c382a..ba70dd7 100644
+--- a/src/formularios/formularios.service.ts
++++ b/src/formularios/formularios.service.ts
+@@ -288,14 +288,20 @@ export class FormulariosService {
+     if (envio.idPaciente !== user.sub && !isAdminSistema(user)) {
+       throw new ForbiddenException('Apenas o paciente pode enviar as respostas');
+     }
+-    const tempo = await salvarRespostas(this.prisma, idEnvio, dto.respostas ?? []);
+-    return {
+-      ...tempo,
+-      envio: await this.prisma.envioFormulario.findUnique({
+-        where: { id: idEnvio },
+-        include: { respostas: true, modelo: { include: { perguntas: true } } },
+-      }),
+-    };
++    const resultado = await salvarRespostas(
++      this.prisma,
++      idEnvio,
++      dto.respostas ?? [],
++    );
++    const envioAtualizado = await this.prisma.envioFormulario.findUnique({
++      where: { id: idEnvio },
++      include: { respostas: true, modelo: { include: { perguntas: true } } },
++    });
++    // Formato antigo preservado (o app do paciente já consome este retorno
++    // como sendo o envio); `gravadas` é o extra de quem quiser conferir.
++    return envioAtualizado
++      ? { ...envioAtualizado, gravadas: resultado.total }
++      : envioAtualizado;
+   }
+ 
+   /**
+--
+2.54.0
+
+
