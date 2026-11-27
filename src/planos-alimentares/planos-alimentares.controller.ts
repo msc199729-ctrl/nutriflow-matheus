@@ -44,9 +44,32 @@ export class PlanosAlimentaresController {
     });
   }
 
+  /**
+   * Plano ativo do paciente logado.
+   *
+   * `findFirst` sem ordem, com mais de um plano ativo, devolve o que o Postgres
+   * quiser — e o app abria um plano ao acaso, às vezes o velho, no lugar do que
+   * o nutricionista acabou de salvar. Aqui a escolha é explícita: o mais
+   * recente ganha (`dataInicio` e, no empate do mesmo dia, o `id` maior).
+   *
+   * Ter dois planos ativos para o mesmo paciente continua sendo erro de dado
+   * (o `PATCH /:id/disponibilidade` deveria desligar o outro); até isso ser
+   * resolvido na origem, o paciente vê sempre o mais novo.
+   */
   @Get('me')
-  meuPlano(@CurrentUser() user: JwtPayloadUser) {
-    return this.planosAlimentaresService.findPlanoAtivoByPaciente(user);
+  async meuPlano(@CurrentUser() user: JwtPayloadUser) {
+    const planos = await this.planosAlimentaresService.findPlanosDisponiveisByPaciente(user);
+    const hoje = new Date();
+    const vigentes = planos.filter(
+      (p) => p.dataInicio == null || new Date(p.dataInicio) <= hoje,
+    );
+    const candidatos = vigentes.length > 0 ? vigentes : planos;
+    if (candidatos.length === 0) return null;
+    return [...candidatos].sort((a, b) => {
+      const da = a.dataInicio ? new Date(a.dataInicio).getTime() : 0;
+      const db = b.dataInicio ? new Date(b.dataInicio).getTime() : 0;
+      return db - da || b.id - a.id;
+    })[0];
   }
 
   @Get('me/todos')
