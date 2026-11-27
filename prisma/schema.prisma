@@ -216,6 +216,7 @@ model Paciente {
   lancamentosFinanceiros LancamentoFinanceiro[]
   calculosEnergeticos   CalculoEnergetico[]
   notificacoes          Notificacao[]
+  ingestoesAgua         IngestaoAgua[]
 
   @@index([workspaceId])
   @@index([idNutricionista])
@@ -627,6 +628,21 @@ model Resposta {
 // ---------------------------------------------------------------------------
 // Análises IA
 // ---------------------------------------------------------------------------
+
+/// Cada copo/garrafa que o paciente registra. Separado do RegistroDiario de
+/// proposito: beber agua nao e refeicao, e misturar os dois fazia o diario
+/// alimentar ganhar um "registro" vazio a cada copo.
+model IngestaoAgua {
+  id           Int      @id @default(autoincrement())
+  idPaciente   Int      @map("id_paciente")
+  quantidadeMl Int      @map("quantidade_ml")
+  registradoEm DateTime @default(now()) @map("registrado_em")
+
+  paciente Paciente @relation(fields: [idPaciente], references: [id], onDelete: Cascade)
+
+  @@index([idPaciente, registradoEm])
+  @@map("ingestoes_agua")
+}
 
 model AnaliseIa {
   id               Int      @id @default(autoincrement())
