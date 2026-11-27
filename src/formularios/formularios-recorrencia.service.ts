@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { StatusConsulta } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { NotificacoesService, TipoNotificacao } from '../notificacoes/notificacoes.service';
 import type { JwtPayloadUser } from '../common/decorators/current-user.decorator';
 import { isAdminSistema, requireWorkspaceId } from '../common/tenant/tenant-scope';
 
@@ -45,7 +46,10 @@ export interface PrevisaoRecorrencia {
 export class FormulariosRecorrenciaService {
   private readonly logger = new Logger(FormulariosRecorrenciaService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notificacoes: NotificacoesService,
+  ) {}
 
   /** 8h de Brasília, todo dia. Grava somente o que está vencido. */
   @Cron('0 8 * * *', { timeZone: APP_TIME_ZONE, name: 'formularios-recorrencia' })
@@ -204,6 +208,23 @@ export class FormulariosRecorrenciaService {
         })),
       });
       criados += resultado.count;
+
+      // Sem isto o cron cria o envio no banco e o paciente nunca sabe: o
+      // check-in automático só existe de verdade quando chega no app dele.
+      const titulo = plano.modelo.titulo;
+      for (const p of aEnviar) {
+        await this.notificacoes.criar({
+          idPaciente: p.idPaciente,
+          tipo: TipoNotificacao.formularioEnviado,
+          titulo: titulo
+            ? `Novo formulário: ${titulo}`
+            : 'Novo formulário de acompanhamento',
+          mensagem: titulo
+            ? `Seu nutricionista enviou o formulário "${titulo}". Responda por aqui mesmo, leva 2 minutos.`
+            : 'Seu nutricionista enviou um formulário de acompanhamento. Responda por aqui mesmo, leva 2 minutos.',
+          idReferencia: null,
+        });
+      }
     }
 
     return { criados, modelos: planos.length };
