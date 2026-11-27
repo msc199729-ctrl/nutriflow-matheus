@@ -1,16 +1,7 @@
-import {
-  Body,
-  Controller,
-  Delete,
-  Get,
-  Param,
-  ParseIntPipe,
-  Post,
-  Put,
-  Query,
-} from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, ParseIntPipe, Post, Put, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { FormulariosService } from './formularios.service';
+import { FormulariosRecorrenciaService } from './formularios-recorrencia.service';
 import { CreateModeloFormularioDto } from './dto/create-modelo-formulario.dto';
 import { UpdateModeloFormularioDto } from './dto/update-modelo-formulario.dto';
 import { CreatePerguntaDto } from './dto/create-pergunta.dto';
@@ -24,7 +15,10 @@ import type { JwtPayloadUser } from '../common/decorators/current-user.decorator
 @ApiBearerAuth('access-token')
 @Controller('formularios')
 export class FormulariosController {
-  constructor(private readonly formulariosService: FormulariosService) {}
+  constructor(
+    private readonly formulariosService: FormulariosService,
+    private readonly recorrenciaService: FormulariosRecorrenciaService,
+  ) {}
 
   @Post('modelos')
   @ApiResponse({ status: 201, description: 'Modelo criado' })
@@ -40,6 +34,16 @@ export class FormulariosController {
   @ApiResponse({ status: 200, description: 'Estatísticas de formulários/check-ins' })
   getStats(@CurrentUser() user: JwtPayloadUser) {
     return this.formulariosService.getStats(user);
+  }
+
+  @Get('recorrencia')
+  @ApiResponse({
+    status: 200,
+    description:
+      'O que a recorrência automática faria hoje, sem gravar nada (quem está a enviar, quem está pendente e quem saiu do acompanhamento)',
+  })
+  previsaoRecorrencia(@CurrentUser() user: JwtPayloadUser) {
+    return this.recorrenciaService.previsao(user);
   }
 
   @Get('modelos')
