@@ -23,6 +23,25 @@ export interface CriarNotificacao {
   idReferencia?: number | null;
 }
 
+export interface NotificacaoPublica {
+  id: number;
+  tipo: string;
+  titulo: string;
+  mensagem: string;
+  idReferencia: number | null;
+  criadoEm: Date;
+  lidaEm: Date | null;
+}
+
+/**
+ * Caixa de entrada do paciente no app.
+ *
+ * Acesso por SQL direto (`$queryRaw`), e não pelo cliente tipado do Prisma:
+ * assim o build não depende de `prisma generate` ter rodado nem de o modelo
+ * estar declarado no schema — o mesmo caminho já usado pelo timbre
+ * (`ProfissionalService`). A tabela é criada pela migração
+ * `20261127090000_add_notificacao_paciente`.
+ */
 @Injectable()
 export class NotificacoesService {
   private readonly logger = new Logger(NotificacoesService.name);
@@ -36,15 +55,11 @@ export class NotificacoesService {
    */
   async criar(dados: CriarNotificacao): Promise<void> {
     try {
-      await this.prisma.notificacao.create({
-        data: {
-          idPaciente: dados.idPaciente,
-          tipo: dados.tipo,
-          titulo: dados.titulo,
-          mensagem: dados.mensagem,
-          idReferencia: dados.idReferencia ?? null,
-        },
-      });
+      await this.prisma.$executeRaw`
+        INSERT INTO "notificacoes" ("id_paciente", "tipo", "titulo", "mensagem", "id_referencia")
+        VALUES (${dados.idPaciente}, ${dados.tipo}, ${dados.titulo}, ${dados.mensagem},
+                ${dados.idReferencia ?? null})
+      `;
     } catch (erro) {
       this.logger.error(
         `Falha ao notificar paciente ${dados.idPaciente} (${dados.tipo}): ${
@@ -60,16 +75,15 @@ export class NotificacoesService {
    */
   async criarSeNovo(dados: CriarNotificacao): Promise<void> {
     try {
-      const existente = await this.prisma.notificacao.findFirst({
-        where: {
-          idPaciente: dados.idPaciente,
-          tipo: dados.tipo,
-          idReferencia: dados.idReferencia ?? null,
-          criadoEm: { gte: new Date(Date.now() - 12 * 60 * 60 * 1000) },
-        },
-        select: { id: true },
-      });
-      if (existente) return;
+      const existentes = await this.prisma.$queryRaw<Array<{ id: number }>>`
+        SELECT "id" FROM "notificacoes"
+         WHERE "id_paciente" = ${dados.idPaciente}
+           AND "tipo" = ${dados.tipo}
+           AND "id_referencia" IS NOT DISTINCT FROM ${dados.idReferencia ?? null}
+           AND "criado_em" >= NOW() - INTERVAL '12 hours'
+         LIMIT 1
+      `;
+      if (existentes.length > 0) return;
     } catch {
       // Se a checagem falhar, cria: aviso a mais é menos grave que aviso nenhum.
     }
@@ -81,17 +95,22 @@ export class NotificacoesService {
     if (user.perfil !== PerfilUsuario.paciente) {
       return { itens: [], naoLidas: 0 };
     }
-    const [itens, naoLidas] = await Promise.all([
-      this.prisma.notificacao.findMany({
-        where: { idPaciente: user.sub },
-        orderBy: { criadoEm: 'desc' },
-        take: 50,
-      }),
-      this.prisma.notificacao.count({
-        where: { idPaciente: user.sub, lidaEm: null },
-      }),
+    const [itens, contagem] = await Promise.all([
+      this.prisma.$queryRaw<NotificacaoPublica[]>`
+        SELECT "id", "tipo", "titulo", "mensagem", "id_referencia" AS "idReferencia",
+               "criado_em" AS "criadoEm", "lida_em" AS "lidaEm"
+          FROM "notificacoes"
+         WHERE "id_paciente" = ${user.sub}
+         ORDER BY "criado_em" DESC
+         LIMIT 50
+      `,
+      this.prisma.$queryRaw<Array<{ total: bigint }>>`
+        SELECT COUNT(*)::bigint AS "total"
+          FROM "notificacoes"
+         WHERE "id_paciente" = ${user.sub} AND "lida_em" IS NULL
+      `,
     ]);
-    return { itens, naoLidas };
+    return { itens, naoLidas: Number(contagem[0]?.total ?? 0) };
   }
 
   /** Marca uma notificação como lida. Idempotente: reler não muda a data. */
@@ -99,27 +118,24 @@ export class NotificacoesService {
     if (user.perfil !== PerfilUsuario.paciente) {
       throw new NotFoundException('Notificação não encontrada');
     }
-    const notificacao = await this.prisma.notificacao.findFirst({
-      where: { id, idPaciente: user.sub },
-      select: { id: true, lidaEm: true },
-    });
-    if (!notificacao) throw new NotFoundException('Notificação não encontrada');
-    if (notificacao.lidaEm) return { id, lidaEm: notificacao.lidaEm };
-    const atualizada = await this.prisma.notificacao.update({
-      where: { id },
-      data: { lidaEm: new Date() },
-      select: { id: true, lidaEm: true },
-    });
-    return atualizada;
+    const linhas = await this.prisma.$queryRaw<Array<{ id: number; lidaEm: Date | null }>>`
+      UPDATE "notificacoes"
+         SET "lida_em" = COALESCE("lida_em", NOW())
+       WHERE "id" = ${id} AND "id_paciente" = ${user.sub}
+      RETURNING "id", "lida_em" AS "lidaEm"
+    `;
+    if (linhas.length === 0) throw new NotFoundException('Notificação não encontrada');
+    return linhas[0];
   }
 
   async marcarTodasLidas(user: JwtPayloadUser) {
     if (user.perfil !== PerfilUsuario.paciente) return { atualizadas: 0 };
-    const r = await this.prisma.notificacao.updateMany({
-      where: { idPaciente: user.sub, lidaEm: null },
-      data: { lidaEm: new Date() },
-    });
-    return { atualizadas: r.count };
+    const r = await this.prisma.$executeRaw`
+      UPDATE "notificacoes"
+         SET "lida_em" = NOW()
+       WHERE "id_paciente" = ${user.sub} AND "lida_em" IS NULL
+    `;
+    return { atualizadas: r };
   }
 
   /**
@@ -127,8 +143,11 @@ export class NotificacoesService {
    * saber se o aviso chegou a ser visto, não só enviado.
    */
   async contarNaoLidasPorPaciente(idPaciente: number): Promise<number> {
-    return this.prisma.notificacao.count({
-      where: { idPaciente, lidaEm: null },
-    });
+    const r = await this.prisma.$queryRaw<Array<{ total: bigint }>>`
+      SELECT COUNT(*)::bigint AS "total"
+        FROM "notificacoes"
+       WHERE "id_paciente" = ${idPaciente} AND "lida_em" IS NULL
+    `;
+    return Number(r[0]?.total ?? 0);
   }
 }

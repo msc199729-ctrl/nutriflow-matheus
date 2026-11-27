@@ -28,7 +28,7 @@ import { AnaliseModule } from './analise/analise.module';
 import { DocumentosModule } from './documentos/documentos.module';
 import { CalculoEnergeticoModule } from './calculo-energetico/calculo-energetico.module';
 import { NutrientesModule } from './micronutrientes/nutrientes.module';
-
+import { NotificacoesModule } from './notificacoes/notificacoes.module';
 
 @Module({
   imports: [
@@ -60,7 +60,7 @@ import { NutrientesModule } from './micronutrientes/nutrientes.module';
     AnaliseModule,
     DocumentosModule,
     CalculoEnergeticoModule,
-
+    NotificacoesModule,
   ],
   controllers: [AppController],
   providers: [
