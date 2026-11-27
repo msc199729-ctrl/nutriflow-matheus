@@ -306,7 +306,7 @@ model AvaliacaoFisica {
   percentualGordura     Float?   @map("percentual_gordura")
   classificacaoGordura  String?  @map("classificacao_gordura")
   massaGorduraKg        Float?   @map("massa_gordura_kg")
-  massaLivreGorduraKg   Float?   @map("massalivre_gordura_kg")
+  massaLivreGorduraKg   Float?   @map("massa_livre_gordura_kg")
   massaResidualKg       Float?   @map("massa_residual_kg")
   massaMuscularKg       Float?   @map("massa_muscular_kg")
 
