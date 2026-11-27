@@ -67,8 +67,34 @@ if (dataStr) {
     include: { itensConsumidos: { include: { alimento: true } } },
     orderBy: { registradoEm: 'asc' },
   });
-  const totalAguaMl = registros.reduce((acc, r) => acc + (r.ingestaoAguaMl ?? 0), 0);
-  return { registros, totalAguaMl };
+
+  // A água saiu do registro diário: beber não é refeição, e cada copo agora tem
+  // linha própria em `ingestoes_agua` (rota /registros-diarios/agua). Somar
+  // `registro.ingestaoAguaMl` aqui daria sempre 0 a partir de agora e o
+  // nutricionista veria "0 L" mesmo com o paciente registrando o dia inteiro.
+  const aguaDoDia = await this.prisma.$queryRaw<Array<{ total: number | null }>>`
+    SELECT COALESCE(SUM("quantidade_ml"), 0)::int AS "total"
+      FROM "ingestoes_agua"
+     WHERE "id_paciente" = ${idPaciente}
+       AND "registrado_em" >= ${inicio}
+       AND "registrado_em" <= ${fim}
+  `;
+  // Registros anteriores à migração ainda guardam a água no campo legado;
+  // somar mantém o histórico do nutricionista sem regressão.
+  const aguaLegada = registros.reduce(
+    (acc, r) => acc + (r.ingestaoAguaMl ?? 0),
+    0,
+  );
+  const totalAguaMl = (aguaDoDia[0]?.total ?? 0) + aguaLegada;
+
+  // A meta vai junto: o prontuário mostra "X de Y L", e sem ela a tela teria
+  // que fazer uma segunda chamada só para o denominador.
+  const paciente = await this.prisma.paciente.findUnique({
+    where: { id: idPaciente },
+    select: { metaAguaMl: true },
+  });
+
+  return { registros, totalAguaMl, metaAguaMl: paciente?.metaAguaMl ?? null };
 }
   private async resolveIdPaciente(
     dto: CreateRegistroDiarioDto,
@@ -136,11 +162,21 @@ if (dataStr) {
   }
 
   /**
-   * Placeholder: enviar imagem do prato para API de Visão da OpenAI (OCR/identificação de alimentos).
-   * Implementação futura: multipart para OpenAI Vision e retorno estruturado.
+   * Análise da foto do prato por visão computacional.
+   *
+   * Ainda não implementado: devolve `indisponivel` para o app poder dizer ao
+   * paciente que o recurso não está pronto, em vez de fingir que analisou
+   * (antes retornava `{ placeholder: true }`, que o app tratava como lista
+   * vazia de alimentos — pior, porque parecia que a foto não tinha comida).
    */
-  async analisarImagemPrato(_imageBuffer: Buffer): Promise<{ placeholder: boolean }> {
-    return { placeholder: true };
+  async analisarImagemPrato(
+    _imageBuffer: Buffer,
+  ): Promise<{ disponivel: false; motivo: string }> {
+    return {
+      disponivel: false,
+      motivo:
+        'A análise da foto do prato ainda não está disponível. Registre os alimentos pela busca.',
+    };
   }
     async remove(user: JwtPayloadUser, id: number) {
     const registro = await this.prisma.registroDiario.findUnique({
