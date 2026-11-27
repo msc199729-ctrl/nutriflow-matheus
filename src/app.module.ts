@@ -30,6 +30,7 @@ import { CalculoEnergeticoModule } from './calculo-energetico/calculo-energetico
 import { NutrientesModule } from './micronutrientes/nutrientes.module';
 import { NotificacoesModule } from './notificacoes/notificacoes.module';
 import { AguaModule } from './agua/agua.module';
+import { ChatModule } from './chat/chat.module';
 
 @Module({
   imports: [
@@ -63,6 +64,7 @@ import { AguaModule } from './agua/agua.module';
     CalculoEnergeticoModule,
     NotificacoesModule,
     AguaModule,
+    ChatModule,
   ],
   controllers: [AppController],
   providers: [
